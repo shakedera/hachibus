@@ -53,7 +53,6 @@ header .today .dia{
   white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;
 }
 .chip.active{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
-.chip.add{color:var(--blue);border-style:dashed;font-weight:600}
 
 /* 次便カード */
 #nextWrap{padding:10px 16px 0}
@@ -379,11 +378,7 @@ function renderChips() {
     c.addEventListener("contextmenu", e => e.preventDefault());
     wrap.appendChild(c);
   });
-  const add = document.createElement("div");
-  add.className = "chip add";
-  add.textContent = "＋追加";
-  add.addEventListener("click", () => { $("#fromInput").focus(); });
-  wrap.appendChild(add);
+  wrap.style.display = favs.length ? "flex" : "none";
 }
 function isFav(f, t) { return favs.some(x => x.f === f && x.t === t); }
 function toggleFav(f, t) {
