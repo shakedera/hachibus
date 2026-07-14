@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1656A0">
+<title>はちバス時刻表</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --blue:#1656A0; --navy:#0E3A6E; --amber:#FFB100;
+  --bg:#EEF1F4; --line:#DDE2E8; --ink:#1B2733; --sub:#66727F;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif;
+  background:var(--bg); color:var(--ink); font-size:15px; line-height:1.5;
+}
+.num{font-variant-numeric:tabular-nums}
+#app{max-width:420px;margin:0 auto;min-height:100vh;background:var(--bg);
+  padding-bottom:24px}
+
+/* ヘッダー */
+header{
+  background:var(--blue); color:#fff; padding:14px 16px 12px;
+  display:flex; justify-content:space-between; align-items:baseline;
+  position:sticky; top:0; z-index:20;
+}
+header h1{font-size:17px;font-weight:700;letter-spacing:.02em}
+header .today{font-size:13px;opacity:.95}
+header .today .dia{
+  display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;
+  background:rgba(255,255,255,.18);font-weight:600;font-size:12px;
+}
+
+/* 有効期限警告バー */
+#expireBar{
+  display:none;background:var(--amber);color:#4A3200;font-size:12.5px;
+  padding:7px 16px;font-weight:600;
+}
+
+/* 定番ルートチップ */
+#chips{
+  display:flex;gap:8px;overflow-x:auto;padding:12px 16px 4px;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;
+}
+#chips::-webkit-scrollbar{display:none}
+.chip{
+  flex:0 0 auto;padding:7px 14px;border-radius:999px;font-size:13px;
+  background:#fff;border:1px solid var(--line);color:var(--ink);
+  white-space:nowrap;user-select:none;-webkit-user-select:none;cursor:pointer;
+}
+.chip.active{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+.chip.add{color:var(--blue);border-style:dashed;font-weight:600}
+
+/* 次便カード */
+#nextWrap{padding:10px 16px 0}
+#nextCard{
+  background:linear-gradient(135deg,var(--blue) 0%,var(--navy) 100%);
+  border-radius:16px;color:#fff;padding:16px 18px 14px;
+  box-shadow:0 4px 14px rgba(14,58,110,.25);
+}
+#nextCard .route{font-size:13px;opacity:.92;margin-bottom:2px}
+#nextCard .main{display:flex;align-items:center;gap:14px}
+#nextCard .count{display:flex;align-items:baseline;color:#fff}
+#nextCard .count .n{font-size:52px;font-weight:800;line-height:1.05;letter-spacing:-.02em}
+#nextCard .count .u{font-size:14px;font-weight:600;margin-left:3px;opacity:.9}
+#nextCard .count .pre{font-size:13px;margin-right:4px;opacity:.9}
+#nextCard .detail{flex:1;min-width:0}
+#nextCard .times{font-size:16px;font-weight:700}
+#nextCard .times .arrow{opacity:.7;font-weight:400;margin:0 3px}
+#nextCard .meta{font-size:12.5px;opacity:.88;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#nextCard.empty{padding:20px 18px;text-align:center;font-size:13.5px;opacity:.95}
+.badge{
+  display:inline-block;background:var(--amber);color:#4A3200;font-weight:800;
+  font-size:12px;border-radius:6px;padding:1px 7px;vertical-align:1px;
+}
+#nextCard .badge{margin-right:6px}
+
+/* 後続便 */
+#after{display:flex;gap:8px;padding:8px 16px 0}
+.afterCard{
+  flex:1;background:#fff;border:1px solid var(--line);border-radius:12px;
+  padding:8px 12px;font-size:12.5px;color:var(--sub);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+.afterCard b{color:var(--ink);font-size:15px;font-weight:700}
+
+/* セクション */
+section.card{
+  background:#fff;border:1px solid var(--line);border-radius:16px;
+  margin:14px 16px 0;padding:14px 16px;
+}
+section.card h2{font-size:13px;color:var(--sub);font-weight:700;margin-bottom:10px;letter-spacing:.04em}
+
+/* 検索フォーム */
+.stopRow{display:flex;align-items:center;gap:8px;position:relative}
+.stopFields{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
+.field{position:relative}
+.field input{
+  width:100%;border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px 10px 34px;font-size:15px;background:#FAFBFC;color:var(--ink);
+}
+.field input:focus{outline:none;border-color:var(--blue);background:#fff}
+.field .mark{
+  position:absolute;left:12px;top:50%;transform:translateY(-50%);
+  width:10px;height:10px;border-radius:50%;
+}
+.field.from .mark{background:var(--blue)}
+.field.to .mark{background:var(--amber)}
+#swapBtn{
+  flex:0 0 auto;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);
+  background:#fff;color:var(--blue);font-size:17px;cursor:pointer;
+}
+#swapBtn:active{background:var(--bg)}
+.suggest{
+  position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;
+  background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 6px 18px rgba(27,39,51,.15);max-height:240px;overflow-y:auto;display:none;
+}
+.suggest div{padding:9px 12px;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer}
+.suggest div:last-child{border-bottom:none}
+.suggest div:active{background:var(--bg)}
+
+/* 下線タブ */
+.tabs{display:flex;border-bottom:2px solid var(--line);margin-top:14px}
+.tabs button{
+  flex:1;background:none;border:none;padding:8px 0 7px;font-size:13.5px;color:var(--sub);
+  cursor:pointer;position:relative;font-weight:600;
+}
+.tabs button.active{color:var(--blue)}
+.tabs button.active::after{
+  content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;background:var(--blue);
+}
+#timeInputWrap{margin-top:10px}
+#timeInput{
+  width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 12px;
+  font-size:16px;background:#FAFBFC;color:var(--ink);
+}
+#timeInput:disabled{opacity:.45}
+
+/* 検索結果 */
+#caption{font-size:12.5px;color:var(--sub);margin:14px 16px 0;font-weight:600}
+#results{
+  background:#fff;border:1px solid var(--line);border-radius:16px;
+  margin:6px 16px 0;overflow:hidden;
+}
+.row{
+  display:flex;align-items:center;gap:10px;padding:11px 12px 11px 14px;
+  border-bottom:1px solid var(--line);position:relative;
+}
+.row:last-child{border-bottom:none}
+.row.soon{background:#EDF4FC}
+.row.soon::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--blue);
+}
+.row .badge{flex:0 0 auto;min-width:34px;text-align:center}
+.row .body{flex:1;min-width:0}
+.row .t{font-size:16.5px;font-weight:700}
+.row .t .arrow{color:var(--sub);font-weight:400;margin:0 2px;font-size:13px}
+.row .t .dur{font-size:12px;color:var(--sub);font-weight:600;margin-left:7px}
+.row .sub{font-size:12px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .star{
+  flex:0 0 auto;background:none;border:none;font-size:21px;color:#C6CDD4;
+  cursor:pointer;padding:4px 2px;line-height:1;
+}
+.row .star.on{color:var(--amber)}
+.empty-msg{padding:22px 16px;text-align:center;color:var(--sub);font-size:13.5px}
+
+/* フッター */
+footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;line-height:1.7}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>はちバス時刻表</h1>
+    <div class="today num" id="todayLabel"></div>
+  </header>
+  <div id="expireBar"></div>
+
+  <div id="chips"></div>
+
+  <div id="nextWrap">
+    <div id="nextCard" class="empty">読み込み中…</div>
+  </div>
+  <div id="after"></div>
+
+  <section class="card">
+    <h2>バス停をさがす</h2>
+    <div class="stopRow">
+      <div class="stopFields">
+        <div class="field from">
+          <span class="mark"></span>
+          <input id="fromInput" type="text" placeholder="乗車バス停" autocomplete="off" enterkeyhint="search">
+          <div class="suggest" id="fromSuggest"></div>
+        </div>
+        <div class="field to">
+          <span class="mark"></span>
+          <input id="toInput" type="text" placeholder="降車バス停" autocomplete="off" enterkeyhint="search">
+          <div class="suggest" id="toSuggest"></div>
+        </div>
+      </div>
+      <button id="swapBtn" title="乗車と降車を入れ替え">⇅</button>
+    </div>
+
+    <div class="tabs" id="modeTabs">
+      <button data-mode="now" class="active">今から</button>
+      <button data-mode="dep">出発</button>
+      <button data-mode="arr">到着</button>
+    </div>
+    <div id="timeInputWrap">
+      <input id="timeInput" type="time" disabled>
+    </div>
+
+    <div class="tabs" id="diaTabs">
+      <button data-dia="0">平日</button>
+      <button data-dia="1">土曜</button>
+      <button data-dia="2">日祝</button>
+    </div>
+  </section>
+
+  <div id="caption"></div>
+  <div id="results"><div class="empty-msg">乗車・降車バス停を選ぶと便を表示します</div></div>
+
+  <footer>
+    出典: 八戸市交通部 GTFS-JPオープンデータ（CC BY 4.0）<br>
+    <span id="expireLabel" class="num"></span>
+  </footer>
+</div>
+
+<script>
+"use strict";
+// ===== 定数・状態 =====
+const DIA_NAMES = ["平日", "土曜", "日祝"];
+const LS_FAVS = "hachibus.favs";     // [{f:乗車グループ名, t:降車グループ名}]
+const LS_STATE = "hachibus.state";   // {sel, from, to, mode, dia, time}
+let DATA = null;
+let groupByName = new Map();   // グループ名 → グループidx
+let stopsOfGroup = [];         // グループidx → [停留所int id]
+let searchIndex = [];          // [{gi, norm, kana}]
+let favs = [];
+let state = { sel: 0, from: "", to: "", mode: "now", dia: 0, time: "" };
+let timer = null;
+
+const $ = s => document.querySelector(s);
+
+// ===== ユーティリティ =====
+// カタカナ→ひらがな + NFKC正規化（かな⇄カナどちらでも検索できるように）
+function norm(s) {
+  return s.normalize("NFKC").toLowerCase().trim()
+    .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+}
+function fmtMin(m) {
+  const mm = m % 1440; // 24時超え表記は当日深夜便として時刻表示
+  const h = Math.floor(m / 60), mi = m % 60;
+  return (m >= 1440 ? h : Math.floor(mm / 60)) + ":" + String(mi).padStart(2, "0");
+}
+function ymd(d) {
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate() + "";
+}
+function nowMin() { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); }
+// 今日のダイヤ区分（calendar_dates の例外日を優先）
+function diaOfToday() {
+  const d = new Date();
+  const ex = DATA.hd[ymd(d)];
+  if (ex !== undefined) return ex;
+  const w = d.getDay();
+  return w === 0 ? 2 : w === 6 ? 1 : 0;
+}
+function stopLabel(si) {
+  const [gi, plat] = DATA.s[si];
+  return DATA.g[gi][0] + (plat ? "（" + plat + "番のりば）" : "");
+}
+function saveState() { localStorage.setItem(LS_STATE, JSON.stringify(state)); }
+function saveFavs() { localStorage.setItem(LS_FAVS, JSON.stringify(favs)); }
+
+// ===== 検索ロジック =====
+// 乗車・降車グループを「その順序で」通る便を抽出（stop_sequence 順のデータを走査）
+function findTrips(fromGi, toGi, dia) {
+  const fa = new Set(stopsOfGroup[fromGi]), ta = new Set(stopsOfGroup[toGi]);
+  const out = [];
+  for (const [cls, bi, hi, flat] of DATA.t) {
+    if (cls !== dia) continue;
+    let bK = -1, bDep = 0, bSi = -1;
+    for (let k = 0; k < flat.length; k += 3) {
+      const si = flat[k], dep = flat[k + 1], dd = flat[k + 2];
+      if (bK < 0) {
+        if (fa.has(si)) { bK = k; bDep = dep; bSi = si; }
+      } else if (ta.has(si)) {
+        out.push({ dep: bDep, arr: dep - dd, badge: DATA.b[bi], head: DATA.h[hi], fs: bSi, ts: si });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+// ===== バス停サジェスト =====
+function buildIndex() {
+  DATA.g.forEach((g, gi) => {
+    groupByName.set(g[0], gi);
+    searchIndex.push({ gi, norm: norm(g[0]), kana: g[1] });
+  });
+  stopsOfGroup = DATA.g.map(() => []);
+  DATA.s.forEach((s, si) => stopsOfGroup[s[0]].push(si));
+}
+function attachSuggest(inputId, boxId, key) {
+  const input = $(inputId), box = $(boxId);
+  input.addEventListener("input", () => {
+    state[key] = ""; // 名前が確定するまで未選択扱い
+    const q = norm(input.value);
+    if (!q) { box.style.display = "none"; render(); return; }
+    const hits = searchIndex.filter(e => e.norm.includes(q) || e.kana.includes(q)).slice(0, 8);
+    box.innerHTML = "";
+    hits.forEach(e => {
+      const div = document.createElement("div");
+      div.textContent = DATA.g[e.gi][0];
+      div.addEventListener("pointerdown", ev => {
+        ev.preventDefault();
+        input.value = DATA.g[e.gi][0];
+        state[key] = DATA.g[e.gi][0];
+        box.style.display = "none";
+        saveState(); render();
+      });
+      box.appendChild(div);
+    });
+    // 完全一致1件ならそのまま確定
+    if (hits.length === 1 && DATA.g[hits[0].gi][0] === input.value) {
+      state[key] = input.value; saveState();
+    }
+    box.style.display = hits.length ? "block" : "none";
+  });
+  input.addEventListener("blur", () => {
+    setTimeout(() => { box.style.display = "none"; }, 150);
+    if (groupByName.has(input.value)) { state[key] = input.value; saveState(); render(); }
+  });
+}
+
+// ===== 定番ルート =====
+function favLabel(f) {
+  const short = n => n.replace(/（.+?）$/, "");
+  return short(f.f) + " → " + short(f.t);
+}
+// 往復ペアが登録済みなら午前=先に登録した方向 / 午後=その逆 を初期表示
+function autoSelectFav() {
+  for (let i = 0; i < favs.length; i++) {
+    for (let j = i + 1; j < favs.length; j++) {
+      if (favs[i].f === favs[j].t && favs[i].t === favs[j].f) {
+        return nowMin() < 720 ? i : j;
+      }
+    }
+  }
+  return Math.min(state.sel, favs.length - 1);
+}
+function renderChips() {
+  const wrap = $("#chips");
+  wrap.innerHTML = "";
+  favs.forEach((f, i) => {
+    const c = document.createElement("div");
+    c.className = "chip" + (i === state.sel ? " active" : "");
+    c.textContent = favLabel(f);
+    c.addEventListener("click", () => { state.sel = i; saveState(); render(); });
+    // 長押しで削除（確認ダイアログあり）
+    let pressTimer = null;
+    c.addEventListener("pointerdown", () => {
+      pressTimer = setTimeout(() => {
+        if (confirm("「" + favLabel(f) + "」を定番ルートから削除しますか？")) {
+          favs.splice(i, 1);
+          if (state.sel >= favs.length) state.sel = 0;
+          saveFavs(); saveState(); render();
+        }
+      }, 600);
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(ev =>
+      c.addEventListener(ev, () => clearTimeout(pressTimer)));
+    c.addEventListener("contextmenu", e => e.preventDefault());
+    wrap.appendChild(c);
+  });
+  const add = document.createElement("div");
+  add.className = "chip add";
+  add.textContent = "＋追加";
+  add.addEventListener("click", () => { $("#fromInput").focus(); });
+  wrap.appendChild(add);
+}
+function isFav(f, t) { return favs.some(x => x.f === f && x.t === t); }
+function toggleFav(f, t) {
+  const i = favs.findIndex(x => x.f === f && x.t === t);
+  if (i >= 0) favs.splice(i, 1); else favs.push({ f, t });
+  if (state.sel >= favs.length) state.sel = Math.max(0, favs.length - 1);
+  saveFavs(); render();
+}
+
+// ===== 次便カード =====
+function renderNext() {
+  const card = $("#nextCard"), after = $("#after");
+  after.innerHTML = "";
+  if (!favs.length) {
+    card.className = "empty";
+    card.innerHTML = "検索結果の <span style='color:var(--amber)'>★</span> をタップすると、定番ルートの次のバスをここに表示します";
+    return;
+  }
+  const f = favs[state.sel] || favs[0];
+  const fgi = groupByName.get(f.f), tgi = groupByName.get(f.t);
+  if (fgi === undefined || tgi === undefined) {
+    card.className = "empty";
+    card.textContent = "定番ルートのバス停が現在のデータに見つかりません（ダイヤ改正の可能性）";
+    return;
+  }
+  const now = nowMin();
+  const trips = findTrips(fgi, tgi, diaOfToday())
+    .filter(t => t.dep >= now).sort((a, b) => a.dep - b.dep);
+  card.className = "";
+  if (!trips.length) {
+    card.className = "empty";
+    card.textContent = favLabel(f) + " ： 本日の便は終了しました";
+    return;
+  }
+  const n = trips[0];
+  const rem = n.dep - now;
+  card.innerHTML =
+    '<div class="route">' + esc(favLabel(f)) + "</div>" +
+    '<div class="main">' +
+      '<div class="count num">' +
+        (rem === 0 ? '<span class="pre">まもなく</span><span class="n">発車</span>'
+                   : '<span class="pre">あと</span><span class="n">' + rem + '</span><span class="u">分</span>') +
+      "</div>" +
+      '<div class="detail">' +
+        '<div>' + (n.badge ? '<span class="badge">' + esc(n.badge) + "</span>" : "") +
+          '<span class="times num">' + fmtMin(n.dep) + '<span class="arrow">→</span>' + fmtMin(n.arr) + "</span></div>" +
+        '<div class="meta num">所要' + (n.arr - n.dep) + "分・" + esc(n.head) + "行</div>" +
+        (DATA.s[n.fs][1] ? '<div class="meta">' + esc(DATA.s[n.fs][1]) + "番のりば</div>" : "") +
+      "</div>" +
+    "</div>";
+  trips.slice(1, 3).forEach(t => {
+    const d = document.createElement("div");
+    d.className = "afterCard num";
+    d.innerHTML = "<b>" + fmtMin(t.dep) + "</b> 発（あと" + (t.dep - now) + "分）" +
+      (t.badge ? "・" + esc(t.badge) : "");
+    after.appendChild(d);
+  });
+}
+
+// ===== 検索結果 =====
+function renderResults() {
+  const box = $("#results"), cap = $("#caption");
+  const fgi = groupByName.get(state.from), tgi = groupByName.get(state.to);
+  if (fgi === undefined || tgi === undefined) {
+    cap.textContent = "";
+    box.innerHTML = '<div class="empty-msg">乗車・降車バス停を選ぶと便を表示します</div>';
+    return;
+  }
+  let trips = findTrips(fgi, tgi, state.dia);
+  const [th, tm] = (state.time || "00:00").split(":").map(Number);
+  const tMin = th * 60 + tm;
+  const now = nowMin();
+  let capText;
+  if (state.mode === "now") {
+    trips = trips.filter(t => t.dep >= now).sort((a, b) => a.dep - b.dep);
+    capText = "今から乗れる便";
+  } else if (state.mode === "dep") {
+    trips = trips.filter(t => t.dep >= tMin).sort((a, b) => a.dep - b.dep);
+    capText = fmtMin(tMin) + " 以降に出発する便";
+  } else {
+    trips = trips.filter(t => t.arr <= tMin).sort((a, b) => b.arr - a.arr);
+    capText = fmtMin(tMin) + " までに到着する便";
+  }
+  cap.textContent = capText + "（" + DIA_NAMES[state.dia] + "ダイヤ・" + trips.length + "便）";
+  if (!trips.length) {
+    box.innerHTML = '<div class="empty-msg">条件に合う便がありません</div>';
+    return;
+  }
+  box.innerHTML = "";
+  trips.slice(0, 40).forEach((t, i) => {
+    const row = document.createElement("div");
+    row.className = "row" + (state.mode === "now" && i === 0 ? " soon" : "");
+    const plat = DATA.s[t.fs][1];
+    row.innerHTML =
+      (t.badge ? '<span class="badge">' + esc(t.badge) + "</span>" : '<span class="badge" style="visibility:hidden">－</span>') +
+      '<div class="body">' +
+        '<div class="t num">' + fmtMin(t.dep) + '<span class="arrow">→</span>' + fmtMin(t.arr) +
+          '<span class="dur">' + (t.arr - t.dep) + "分</span></div>" +
+        '<div class="sub">' + esc(t.head) + "行" + (plat ? "・" + esc(plat) + "番のりば" : "") + "</div>" +
+      "</div>";
+    const star = document.createElement("button");
+    star.className = "star" + (isFav(state.from, state.to) ? " on" : "");
+    star.textContent = "★";
+    star.title = "定番ルートに登録";
+    star.addEventListener("click", () => toggleFav(state.from, state.to));
+    row.appendChild(star);
+    box.appendChild(row);
+  });
+  if (trips.length > 40) {
+    const more = document.createElement("div");
+    more.className = "empty-msg";
+    more.textContent = "ほか " + (trips.length - 40) + " 便";
+    box.appendChild(more);
+  }
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ===== ヘッダー・警告 =====
+function renderHeader() {
+  const d = new Date();
+  const w = "日月火水木金土"[d.getDay()];
+  $("#todayLabel").innerHTML =
+    (d.getMonth() + 1) + "/" + d.getDate() + "（" + w + "）" +
+    '<span class="dia">' + DIA_NAMES[diaOfToday()] + "ダイヤ</span>";
+  // 有効期限
+  const ex = DATA.ex;
+  const exDate = new Date(+ex.slice(0, 4), +ex.slice(4, 6) - 1, +ex.slice(6, 8));
+  $("#expireLabel").textContent =
+    "ダイヤ有効期限: " + exDate.getFullYear() + "/" + (exDate.getMonth() + 1) + "/" + exDate.getDate() +
+    (DATA.v ? "（" + DATA.v + "）" : "");
+  const days = Math.floor((exDate - d) / 86400000);
+  if (days < 14) {
+    const bar = $("#expireBar");
+    bar.style.display = "block";
+    bar.textContent = days < 0
+      ? "ダイヤの有効期限が切れています。データを更新してください"
+      : "ダイヤ改正の可能性があります。データを更新してください（有効期限まで" + days + "日）";
+  }
+}
+
+// ===== タブ =====
+function bindTabs() {
+  $("#modeTabs").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.mode = b.dataset.mode;
+    document.querySelectorAll("#modeTabs button").forEach(x => x.classList.toggle("active", x === b));
+    $("#timeInput").disabled = state.mode === "now";
+    if (state.mode !== "now" && !state.time) {
+      const n = nowMin();
+      state.time = String(Math.floor(n / 60)).padStart(2, "0") + ":" + String(n % 60).padStart(2, "0");
+      $("#timeInput").value = state.time;
+    }
+    saveState(); renderResults();
+  });
+  $("#diaTabs").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.dia = +b.dataset.dia;
+    document.querySelectorAll("#diaTabs button").forEach(x => x.classList.toggle("active", x === b));
+    saveState(); renderResults();
+  });
+  $("#timeInput").addEventListener("change", () => {
+    state.time = $("#timeInput").value; saveState(); renderResults();
+  });
+  $("#swapBtn").addEventListener("click", () => {
+    [state.from, state.to] = [state.to, state.from];
+    $("#fromInput").value = state.from;
+    $("#toInput").value = state.to;
+    saveState(); renderResults();
+  });
+}
+function applyStateToUI() {
+  $("#fromInput").value = state.from;
+  $("#toInput").value = state.to;
+  document.querySelectorAll("#modeTabs button").forEach(x =>
+    x.classList.toggle("active", x.dataset.mode === state.mode));
+  document.querySelectorAll("#diaTabs button").forEach(x =>
+    x.classList.toggle("active", +x.dataset.dia === state.dia));
+  $("#timeInput").disabled = state.mode === "now";
+  if (state.time) $("#timeInput").value = state.time;
+}
+
+function render() {
+  renderHeader();
+  renderChips();
+  renderNext();
+  renderResults();
+}
+
+// ===== 起動 =====
+async function main() {
+  try {
+    const res = await fetch("data.json");
+    DATA = await res.json();
+  } catch (e) {
+    $("#nextCard").textContent = "data.json の読み込みに失敗しました";
+    return;
+  }
+  buildIndex();
+  try { favs = JSON.parse(localStorage.getItem(LS_FAVS)) || []; } catch (e) { favs = []; }
+  try {
+    const st = JSON.parse(localStorage.getItem(LS_STATE));
+    if (st) state = Object.assign(state, st);
+  } catch (e) { /* 初期値のまま */ }
+  if (!["now", "dep", "arr"].includes(state.mode)) state.mode = "now";
+  if (![0, 1, 2].includes(state.dia)) state.dia = diaOfToday();
+  // 初回起動時（保存が無いとき）は今日のダイヤを初期値に
+  if (localStorage.getItem(LS_STATE) === null) state.dia = diaOfToday();
+  state.sel = autoSelectFav();
+  if (state.sel < 0) state.sel = 0;
+
+  attachSuggest("#fromInput", "#fromSuggest", "from");
+  attachSuggest("#toInput", "#toSuggest", "to");
+  bindTabs();
+  applyStateToUI();
+  render();
+
+  // 1分ごとに「あと◯分」を自動更新
+  timer = setInterval(() => { renderNext(); if (state.mode === "now") renderResults(); }, 60000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) render();
+  });
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+}
+main();
+</script>
+</body>
+</html>
