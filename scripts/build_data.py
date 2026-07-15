@@ -162,7 +162,11 @@ def main():
         trip_stops[tid].append((int(r["stop_sequence"]), stop_int[sid], dep, dep - arr))
         if tid not in trip_badge:
             m = badge_re.match(r.get("stop_headsign", "") or "")
-            trip_badge[tid] = m.group(1) if m else ""
+            badge = m.group(1) if m else ""
+            # 市内循環線は系統番号ではなく運賃 [190円] が入っているため置き換える
+            if re.fullmatch(r"\d+円", badge):
+                badge = "循環" if "循環" in r.get("stop_headsign", "") else ""
+            trip_badge[tid] = badge
 
     # 文字列テーブル（系統番号・行き先）で重複を除く
     badge_table, badge_idx = [], {}

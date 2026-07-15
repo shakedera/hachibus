@@ -191,15 +191,15 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
 }
 .overlay.show{opacity:1;pointer-events:auto}
 .sheet{
-  position:fixed;left:50%;bottom:0;z-index:41;
+  position:fixed;left:50%;top:0;z-index:41;
   width:100%;max-width:420px;
-  background:#fff;border-radius:20px 20px 0 0;
-  padding:10px 16px 18px;
-  transform:translate(-50%,105%);transition:transform .28s cubic-bezier(.32,.72,.2,1);
-  box-shadow:0 -6px 30px rgba(14,58,110,.2);
+  max-height:92vh;overflow-y:auto;
+  background:#fff;border-radius:0 0 20px 20px;
+  padding:16px 16px 16px;
+  transform:translate(-50%,-105%);transition:transform .28s cubic-bezier(.32,.72,.2,1);
+  box-shadow:0 6px 30px rgba(14,58,110,.2);
 }
 .sheet.show{transform:translate(-50%,0)}
-.handle{width:38px;height:4px;border-radius:2px;background:#CBD5E0;margin:2px auto 12px}
 .sheethead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .sheet h2{
   font-size:15px;font-weight:800;color:var(--ink);
@@ -254,6 +254,21 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
 .noresult{padding:12px 13px;font-size:12.5px;color:var(--sub)}
 .sheetnote{font-size:11.5px;color:var(--sub);margin-bottom:8px;min-height:16px}
 .sheetnote b{color:var(--dest-red);font-weight:800}
+/* 位置情報の取得中・エラー */
+.locloading{display:none;padding:30px 0 26px;text-align:center}
+.locloading.show{display:block}
+.radar{
+  width:44px;height:44px;margin:0 auto 12px;border-radius:50%;
+  border:3px solid #E3F0FD;border-top-color:var(--blue);
+  animation:spin 1s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.locloading p{font-size:13px;color:var(--sub)}
+.locerror{display:none;padding:22px 6px 8px;text-align:center}
+.locerror.show{display:block}
+.locerror .icon{font-size:30px;margin-bottom:8px}
+.locerror h3{font-size:14.5px;font-weight:800;margin-bottom:6px}
+.locerror p{font-size:12.5px;color:var(--sub);line-height:1.65;margin-bottom:6px}
 /* 近いバス停リスト */
 .stoplist{display:none}
 .stoplist.show{display:block}
@@ -318,6 +333,22 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
   text-shadow:1px 0 0 #fff,-1px 0 0 #fff,0 1px 0 #fff,0 -1px 0 #fff,
     1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;
 }
+/* 現在地（青いパルスドット） */
+.mepin{position:relative;transform:translate(-50%,-50%);width:14px;height:14px}
+.mepin .dot{
+  width:14px;height:14px;border-radius:50%;background:var(--blue);
+  border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);
+}
+.mepin .pulse{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:14px;height:14px;border-radius:50%;border:2px solid var(--blue);
+  animation:mepulse 2s ease-out infinite;
+}
+@keyframes mepulse{
+  0%{width:14px;height:14px;opacity:.55}
+  70%{width:46px;height:46px;opacity:0}
+  100%{width:46px;height:46px;opacity:0}
+}
 .dpin{position:relative;transform:translate(-50%,-100%);width:max-content}
 .dpin svg{display:block}
 .dpin .dlabel{
@@ -378,6 +409,10 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
         <div class="field from">
           <span class="mark"></span>
           <input id="fromInput" type="text" placeholder="乗車バス停" autocomplete="off" enterkeyhint="search">
+          <button class="locbtn" id="fromLocBtn" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+            現在地から
+          </button>
           <div class="suggest" id="fromSuggest"></div>
         </div>
         <div class="field to">
@@ -420,11 +455,10 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
   <!-- 目的地から: ボトムシート -->
   <div class="overlay" id="locOverlay"></div>
   <div class="sheet" id="locSheet">
-    <div class="handle"></div>
     <div class="sheethead">
       <h2>
         <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
-        <span>目的地の近くのバス停</span>
+        <span id="locTitle">目的地の近くのバス停</span>
       </h2>
       <div class="viewtoggle" id="viewToggle">
         <button class="active" data-view="list" type="button">リスト</button>
@@ -442,6 +476,17 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
     </div>
 
     <p class="sheetnote" id="sheetNote"></p>
+
+    <div class="locloading" id="locLoading">
+      <div class="radar"></div>
+      <p>位置情報を取得中…</p>
+    </div>
+
+    <div class="locerror" id="locError">
+      <div class="icon">📍</div>
+      <h3>位置情報を利用できません</h3>
+      <p>ブラウザの設定で位置情報が許可されていません。<br>iPhoneの場合：設定 → Safari → 位置情報 から<br>「確認」または「許可」を選んでください。<br>上の検索欄から施設名で探すこともできます。</p>
+    </div>
 
     <div class="stoplist" id="stoplist"></div>
 
@@ -547,6 +592,15 @@ function buildIndex() {
 }
 function attachSuggest(inputId, boxId, key) {
   const input = $(inputId), box = $(boxId);
+  // タップ（フォーカス）したら前回の入力を消して、すぐ打ち直せるようにする
+  input.addEventListener("focus", () => {
+    if (input.value) {
+      input.value = "";
+      state[key] = "";
+      saveState();
+      renderResults();
+    }
+  });
   input.addEventListener("input", () => {
     state[key] = ""; // 名前が確定するまで未選択扱い
     const q = norm(input.value);
@@ -743,11 +797,15 @@ function esc(s) {
 const PS_DEBOUNCE = 500;       // Nominatimは1秒1リクエスト制限のためデバウンス
 const psCache = new Map();     // 検索語 → 結果（同じ語の再リクエストを避ける）
 let psTimer = null, psAbort = null, psViewbox = null;
-let facility = null;           // {name, lat, lon}
+let targetField = "to";        // 'from'（乗車） | 'to'（降車）
+let refPoint = null;           // 基準点 {label, lat, lon, isMe}（施設 or 現在地）
+let lastGeo = null;            // 直近の現在地（施設検索クリア時に戻す）
 let nearStops = [];            // [{gi, si, d}] 近い順5件
 let selStop = null;
-let locMap = null, stopMarkers = [], destMarker = null;
+let locMap = null, stopMarkers = [], refMarker = null;
 let locView = "list", locToastTimer = null;
+function fieldLabel() { return targetField === "from" ? "乗車" : "降車"; }
+function refLabel() { return refPoint.isMe ? "現在地" : "「" + refPoint.label + "」"; }
 
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 6371000, rad = Math.PI / 180;
@@ -823,17 +881,25 @@ function renderSug(list) {
 }
 
 function chooseFacility(name, lat, lon) {
-  facility = { name, lat, lon };
   $("#psInput").value = name;
   hideSug();
   $("#psClear").classList.add("show");
-  nearStops = nearestGroups(lat, lon, 5);
+  setRefPoint({ label: name, lat, lon, isMe: false }, "map"); // 施設選択後は地図で位置を見せる
+}
+
+// 基準点（施設 or 現在地）を設定して近いバス停を表示する
+function setRefPoint(ref, view) {
+  refPoint = ref;
+  $("#locError").classList.remove("show");
+  nearStops = nearestGroups(ref.lat, ref.lon, 5);
   selStop = null;
   $("#selectbar").classList.remove("show");
-  $("#sheetNote").innerHTML = "<b>「" + esc(name) + "」</b>の近くのバス停を表示中";
+  $("#sheetNote").innerHTML = ref.isMe
+    ? "タップすると" + fieldLabel() + "バス停に設定します"
+    : "<b>「" + esc(ref.label) + "」</b>の近くのバス停を表示中";
   $("#viewToggle").classList.add("show");
   renderStopList();
-  setLocView("map");   // 施設選択後は地図で位置を見せる（モック準拠）
+  setLocView(view);
   updateLocMap();
 }
 
@@ -850,19 +916,19 @@ function renderStopList() {
         stopsOfGroup[ns.gi].length + "か所</div></div>" +
       '<div class="dist"><div class="m num">' + distLabel(ns.d) + '</div><div class="walk">徒歩' +
         walkMin(ns.d) + "分</div></div>";
-    row.addEventListener("click", () => applyDestStop(name));
+    row.addEventListener("click", () => applyLocStop(name));
     box.appendChild(row);
   });
 }
 
-function applyDestStop(name) {
-  state.to = name;
-  $("#toInput").value = name;
+function applyLocStop(name) {
+  state[targetField] = name;
+  $(targetField === "from" ? "#fromInput" : "#toInput").value = name;
   saveState();
   closeLocSheet();
   renderResults();
   const t = $("#locToast");
-  t.textContent = "降車バス停を「" + name + "」に設定しました";
+  t.textContent = fieldLabel() + "バス停を「" + name + "」に設定しました";
   t.classList.add("show");
   clearTimeout(locToastTimer);
   locToastTimer = setTimeout(() => t.classList.remove("show"), 2200);
@@ -881,6 +947,10 @@ function destIcon(name) {
     '<circle cx="15" cy="14" r="4.5" fill="#fff"/></svg>' +
     '<div class="dlabel">' + esc(name) + "</div></div>" });
 }
+function meIcon() {
+  return L.divIcon({ className: "", iconSize: [0, 0], html:
+    '<div class="mepin"><div class="pulse"></div><div class="dot"></div></div>' });
+}
 function ensureLocMap() {
   if (locMap || typeof L === "undefined") return;
   locMap = L.map("locMap", { zoomControl: false });
@@ -891,7 +961,7 @@ function ensureLocMap() {
   $("#zoomIn").addEventListener("click", () => locMap.zoomIn());
   $("#zoomOut").addEventListener("click", () => locMap.zoomOut());
   $("#recenter").addEventListener("click", () => {
-    if (facility) locMap.setView([facility.lat, facility.lon], 16);
+    if (refPoint) locMap.setView([refPoint.lat, refPoint.lon], 16);
   });
 }
 function updateLocMap() {
@@ -899,17 +969,18 @@ function updateLocMap() {
   if (!locMap) return;
   stopMarkers.forEach(m => locMap.removeLayer(m));
   stopMarkers = [];
-  if (destMarker) { locMap.removeLayer(destMarker); destMarker = null; }
-  if (!facility) return;
-  destMarker = L.marker([facility.lat, facility.lon],
-    { icon: destIcon(facility.name), interactive: false, zIndexOffset: 1000 }).addTo(locMap);
+  if (refMarker) { locMap.removeLayer(refMarker); refMarker = null; }
+  if (!refPoint) return;
+  refMarker = L.marker([refPoint.lat, refPoint.lon],
+    { icon: refPoint.isMe ? meIcon() : destIcon(refPoint.label),
+      interactive: false, zIndexOffset: 1000 }).addTo(locMap);
   nearStops.forEach((ns, i) => {
     const s = DATA.s[ns.si];
     const mk = L.marker([s[2], s[3]], { icon: stopIcon(DATA.g[ns.gi][0], i === 0, false) }).addTo(locMap);
     mk.on("click", () => selectStopPin(ns));
     stopMarkers.push(mk);
   });
-  locMap.setView([facility.lat, facility.lon], 16);
+  locMap.setView([refPoint.lat, refPoint.lon], 16);
   setTimeout(() => locMap.invalidateSize(), 0);
 }
 function selectStopPin(ns) {
@@ -917,7 +988,7 @@ function selectStopPin(ns) {
   stopMarkers.forEach((mk, i) =>
     mk.setIcon(stopIcon(DATA.g[nearStops[i].gi][0], i === 0, nearStops[i] === ns)));
   $("#selName").textContent = DATA.g[ns.gi][0];
-  $("#selDist").textContent = "「" + facility.name + "」から" + distLabel(ns.d) +
+  $("#selDist").textContent = refLabel() + "から" + distLabel(ns.d) +
     "・徒歩" + walkMin(ns.d) + "分（のりば" + stopsOfGroup[ns.gi].length + "か所）";
   $("#selectbar").classList.add("show");
 }
@@ -931,12 +1002,43 @@ function setLocView(v) {
   if (v === "map" && locMap) setTimeout(() => locMap.invalidateSize(), 0);
 }
 
-function openLocSheet() {
+function openLocSheet(field) {
   if (!DATA) return;
+  targetField = field;
+  refPoint = null; nearStops = []; selStop = null;
+  // 前回の検索内容は引き継がない（毎回まっさらな状態で開く）
+  $("#psInput").value = "";
+  $("#psClear").classList.remove("show");
+  hideSug();
+  $("#viewToggle").classList.remove("show");
+  $("#stoplist").classList.remove("show");
+  $("#mapview").classList.remove("show");
+  $("#selectbar").classList.remove("show");
+  $("#locError").classList.remove("show");
+  $("#locLoading").classList.remove("show");
+  $("#locTitle").textContent = field === "from" ? "現在地から近いバス停" : "目的地の近くのバス停";
+  $("#selConfirm").textContent = fieldLabel() + "に設定";
+  $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
   $("#locOverlay").classList.add("show");
   $("#locSheet").classList.add("show");
-  if (!facility) $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
-  $("#psInput").focus();
+  if (field === "from") startGeolocate();
+  else $("#psInput").focus();
+}
+function startGeolocate() {
+  if (!navigator.geolocation) { $("#locError").classList.add("show"); return; }
+  $("#locLoading").classList.add("show");
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      $("#locLoading").classList.remove("show");
+      lastGeo = { label: "現在地", lat: pos.coords.latitude, lon: pos.coords.longitude, isMe: true };
+      setRefPoint(lastGeo, "list");  // 現在地はまずリスト表示（モック準拠）
+    },
+    () => {
+      $("#locLoading").classList.remove("show");
+      $("#locError").classList.add("show");
+    },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+  );
 }
 function closeLocSheet() {
   $("#locOverlay").classList.remove("show");
@@ -945,25 +1047,30 @@ function closeLocSheet() {
 }
 
 function bindLocSheet() {
-  $("#destBtn").addEventListener("click", openLocSheet);
+  $("#destBtn").addEventListener("click", () => openLocSheet("to"));
+  $("#fromLocBtn").addEventListener("click", () => openLocSheet("from"));
   $("#locOverlay").addEventListener("click", closeLocSheet);
   $("#viewToggle").addEventListener("click", e => {
     const b = e.target.closest("button");
     if (b) setLocView(b.dataset.view);
   });
   $("#selConfirm").addEventListener("click", () => {
-    if (selStop) applyDestStop(DATA.g[selStop.gi][0]);
+    if (selStop) applyLocStop(DATA.g[selStop.gi][0]);
   });
   $("#psClear").addEventListener("click", () => {
     $("#psInput").value = "";
     $("#psClear").classList.remove("show");
     hideSug();
-    facility = null; nearStops = []; selStop = null;
-    $("#viewToggle").classList.remove("show");
-    $("#selectbar").classList.remove("show");
-    $("#stoplist").classList.remove("show");
-    $("#mapview").classList.remove("show");
-    $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
+    if (targetField === "from" && lastGeo) {
+      setRefPoint(lastGeo, "list");  // 施設検索を消したら現在地基準に戻す
+    } else {
+      refPoint = null; nearStops = []; selStop = null;
+      $("#viewToggle").classList.remove("show");
+      $("#selectbar").classList.remove("show");
+      $("#stoplist").classList.remove("show");
+      $("#mapview").classList.remove("show");
+      $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
+    }
     $("#psInput").focus();
   });
   const runSearch = async q => {
