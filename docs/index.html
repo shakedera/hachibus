@@ -7,6 +7,8 @@
 <title>はちバス時刻表</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<script src="vendor/leaflet.js" defer></script>
 <style>
 :root{
   --blue:#1656A0; --navy:#0E3A6E; --amber:#FFB100;
@@ -97,11 +99,21 @@ section.card h2{font-size:13px;color:var(--sub);font-weight:700;margin-bottom:10
 /* 検索フォーム */
 .stopRow{display:flex;align-items:center;gap:8px;position:relative}
 .stopFields{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
-.field{position:relative}
+.field{position:relative;display:flex;align-items:center;gap:8px}
 .field input{
-  width:100%;border:1px solid var(--line);border-radius:10px;
+  flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;
   padding:10px 12px 10px 34px;font-size:15px;background:#FAFBFC;color:var(--ink);
 }
+.locbtn{
+  flex:none;display:flex;align-items:center;gap:5px;
+  border:1.5px solid var(--blue);color:var(--blue);
+  background:#fff;border-radius:999px;
+  font-size:12px;font-weight:700;
+  padding:6px 11px;cursor:pointer;
+  transition:background .15s;
+}
+.locbtn:active{background:#E3F0FD}
+.locbtn svg{width:13px;height:13px;fill:var(--blue)}
 .field input:focus{outline:none;border-color:var(--blue);background:#fff}
 .field .mark{
   position:absolute;left:12px;top:50%;transform:translateY(-50%);
@@ -170,6 +182,178 @@ section.card h2{font-size:13px;color:var(--sub);font-weight:700;margin-bottom:10
 
 /* フッター */
 footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;line-height:1.7}
+
+/* ===== 目的地から（ボトムシート） mock-location-v4 準拠 ===== */
+:root{--dest-red:#E0503A}
+.overlay{
+  position:fixed;inset:0;background:rgba(16,32,54,.42);
+  opacity:0;pointer-events:none;transition:opacity .22s;z-index:40;
+}
+.overlay.show{opacity:1;pointer-events:auto}
+.sheet{
+  position:fixed;left:50%;bottom:0;z-index:41;
+  width:100%;max-width:420px;
+  background:#fff;border-radius:20px 20px 0 0;
+  padding:10px 16px 18px;
+  transform:translate(-50%,105%);transition:transform .28s cubic-bezier(.32,.72,.2,1);
+  box-shadow:0 -6px 30px rgba(14,58,110,.2);
+}
+.sheet.show{transform:translate(-50%,0)}
+.handle{width:38px;height:4px;border-radius:2px;background:#CBD5E0;margin:2px auto 12px}
+.sheethead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sheet h2{
+  font-size:15px;font-weight:800;color:var(--ink);
+  display:flex;align-items:center;gap:7px;
+}
+.sheet h2 svg{width:16px;height:16px;fill:var(--blue)}
+.viewtoggle{display:none;flex:none;background:#EDF2F7;border-radius:999px;padding:3px}
+.viewtoggle.show{display:flex}
+.viewtoggle button{
+  border:none;background:none;color:var(--sub);
+  font-size:12px;font-weight:700;
+  padding:5px 14px;border-radius:999px;cursor:pointer;
+  transition:all .15s;
+}
+.viewtoggle button.active{background:var(--blue);color:#fff}
+/* 施設検索ボックス */
+.placesearch{position:relative;margin-bottom:8px}
+.psrow{
+  display:flex;align-items:center;gap:8px;
+  border:1.5px solid var(--line);border-radius:12px;
+  padding:9px 12px;background:#FAFCFE;
+}
+.psrow:focus-within{border-color:var(--blue)}
+.psrow svg{flex:none;width:15px;height:15px;fill:#8A97A5}
+.psrow input{
+  flex:1;border:none;outline:none;background:transparent;
+  font-size:14px;color:var(--ink);min-width:0;padding:0;
+}
+.psrow input::placeholder{color:#A6B2BF}
+.psrow .clear{
+  flex:none;display:none;border:none;background:#DDE5EC;color:var(--sub);
+  width:20px;height:20px;border-radius:50%;font-size:11px;cursor:pointer;line-height:1;
+}
+.psrow .clear.show{display:block}
+.pssuggest{
+  position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;
+  background:#fff;border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 6px 20px rgba(14,58,110,.14);
+  overflow:hidden;display:none;
+}
+.pssuggest.show{display:block}
+.sugrow{
+  display:flex;align-items:center;gap:10px;
+  padding:11px 13px;cursor:pointer;font-size:14px;
+  border-bottom:1px solid #F0F4F8;
+}
+.sugrow:last-child{border-bottom:none}
+.sugrow:active{background:#F4F8FC}
+.sugrow svg{flex:none;width:14px;height:14px;fill:var(--dest-red)}
+.sugrow span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sugrow .kind{margin-left:auto;flex:none;font-size:10.5px;color:var(--sub)}
+.noresult{padding:12px 13px;font-size:12.5px;color:var(--sub)}
+.sheetnote{font-size:11.5px;color:var(--sub);margin-bottom:8px;min-height:16px}
+.sheetnote b{color:var(--dest-red);font-weight:800}
+/* 近いバス停リスト */
+.stoplist{display:none}
+.stoplist.show{display:block}
+.stoprow{
+  display:flex;align-items:center;gap:12px;
+  padding:11px 2px;border-bottom:1px solid var(--line);cursor:pointer;
+}
+.stoprow:last-child{border-bottom:none}
+.stoprow:active{background:#F4F8FC}
+.stoprow .pin{
+  flex:none;width:34px;height:34px;border-radius:50%;
+  background:#E3F0FD;display:flex;align-items:center;justify-content:center;
+}
+.stoprow .pin svg{width:15px;height:15px;fill:var(--blue)}
+.stoprow:first-of-type .pin{background:var(--amber)}
+.stoprow:first-of-type .pin svg{fill:#fff}
+.stoprow .info{flex:1;min-width:0}
+.stoprow .name{font-size:15px;font-weight:700}
+.stoprow .plat{font-size:11px;color:var(--sub);margin-top:2px}
+.stoprow .dist{flex:none;text-align:right}
+.stoprow .dist .m{font-size:14px;font-weight:800;color:var(--navy)}
+.stoprow .dist .walk{font-size:10.5px;color:var(--sub);margin-top:2px}
+/* 地図ビュー（Leaflet） */
+.mapview{display:none}
+.mapview.show{display:block}
+.mapbox{
+  border-radius:14px;overflow:hidden;
+  border:1px solid var(--line);position:relative;
+}
+#locMap{width:100%;height:260px;background:#E9E6DD}
+.maphint{
+  position:absolute;top:8px;left:8px;z-index:900;
+  background:rgba(255,255,255,.92);border-radius:8px;
+  font-size:10.5px;color:var(--sub);font-weight:600;
+  padding:5px 9px;pointer-events:none;
+}
+.mapctrl{
+  position:absolute;right:8px;bottom:8px;z-index:900;
+  display:flex;flex-direction:column;gap:6px;
+}
+.mapctrl button{
+  width:34px;height:34px;border-radius:10px;
+  border:1px solid var(--line);background:rgba(255,255,255,.95);
+  color:var(--ink);font-size:17px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 4px rgba(14,58,110,.12);
+}
+.mapctrl button:active{background:#E3F0FD}
+.mapctrl button svg{width:17px;height:17px;fill:var(--blue)}
+/* Leaflet 上のピン（divIcon） */
+.mpin{display:flex;flex-direction:column;align-items:center;width:max-content;
+  transform:translate(-50%,-13px);cursor:pointer}
+.mpin .mdot{
+  width:20px;height:20px;border-radius:50%;background:var(--blue);
+  border:3px solid #fff;color:#fff;font-size:10px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 4px rgba(0,0,0,.35);transition:background .15s;
+}
+.mpin.closest .mdot,.mpin.selected .mdot{background:var(--amber)}
+.mpin .mlabel{
+  font-size:10px;font-weight:700;color:#37474F;white-space:nowrap;margin-top:2px;
+  text-shadow:1px 0 0 #fff,-1px 0 0 #fff,0 1px 0 #fff,0 -1px 0 #fff,
+    1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;
+}
+.dpin{position:relative;transform:translate(-50%,-100%);width:max-content}
+.dpin svg{display:block}
+.dpin .dlabel{
+  position:absolute;top:100%;left:50%;transform:translateX(-50%);
+  font-size:10px;font-weight:800;color:var(--dest-red);white-space:nowrap;
+  text-shadow:1px 0 0 #fff,-1px 0 0 #fff,0 1px 0 #fff,0 -1px 0 #fff,
+    1px 1px 0 #fff,-1px -1px 0 #fff,1px -1px 0 #fff,-1px 1px 0 #fff;
+}
+/* 選択バー */
+.selectbar{
+  display:none;align-items:center;gap:10px;
+  margin-top:10px;padding:10px 12px;
+  background:#F4F8FC;border:1px solid #CFE3F7;border-radius:12px;
+}
+.selectbar.show{display:flex}
+.selectbar .sinfo{flex:1;min-width:0}
+.selectbar .sname{font-size:14.5px;font-weight:800}
+.selectbar .sdist{font-size:11px;color:var(--sub);margin-top:1px}
+.selectbar button{
+  flex:none;border:none;background:var(--blue);color:#fff;
+  font-size:13px;font-weight:700;border-radius:999px;
+  padding:9px 18px;cursor:pointer;
+}
+.selectbar button:active{background:var(--navy)}
+/* トースト */
+.toast{
+  position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);
+  background:#26313D;color:#fff;font-size:12.5px;font-weight:600;
+  padding:10px 18px;border-radius:999px;white-space:nowrap;
+  opacity:0;pointer-events:none;transition:all .25s;z-index:60;
+  max-width:92%;overflow:hidden;text-overflow:ellipsis;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important;animation:none !important}
+}
 </style>
 </head>
 <body>
@@ -199,6 +383,10 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
         <div class="field to">
           <span class="mark"></span>
           <input id="toInput" type="text" placeholder="降車バス停" autocomplete="off" enterkeyhint="search">
+          <button class="locbtn" id="destBtn" type="button">
+            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+            目的地から
+          </button>
           <div class="suggest" id="toSuggest"></div>
         </div>
       </div>
@@ -228,6 +416,57 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
     出典: 八戸市交通部 GTFS-JPオープンデータ（CC BY 4.0）<br>
     <span id="expireLabel" class="num"></span>
   </footer>
+
+  <!-- 目的地から: ボトムシート -->
+  <div class="overlay" id="locOverlay"></div>
+  <div class="sheet" id="locSheet">
+    <div class="handle"></div>
+    <div class="sheethead">
+      <h2>
+        <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+        <span>目的地の近くのバス停</span>
+      </h2>
+      <div class="viewtoggle" id="viewToggle">
+        <button class="active" data-view="list" type="button">リスト</button>
+        <button data-view="map" type="button">地図</button>
+      </div>
+    </div>
+
+    <div class="placesearch">
+      <div class="psrow">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+        <input id="psInput" type="text" placeholder="施設名で検索（例：はっち・市庁）" autocomplete="off">
+        <button class="clear" id="psClear" type="button">✕</button>
+      </div>
+      <div class="pssuggest" id="psSuggest"></div>
+    </div>
+
+    <p class="sheetnote" id="sheetNote"></p>
+
+    <div class="stoplist" id="stoplist"></div>
+
+    <div class="mapview" id="mapview">
+      <div class="mapbox">
+        <div id="locMap"></div>
+        <div class="maphint">ドラッグで移動・ピンチで拡大</div>
+        <div class="mapctrl">
+          <button id="zoomIn" title="拡大" type="button">＋</button>
+          <button id="zoomOut" title="縮小" type="button">−</button>
+          <button id="recenter" title="目的地に戻る" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 3h-1.07A8 8 0 0 0 13 4.07V3h-2v1.07A8 8 0 0 0 4.07 11H3v2h1.07A8 8 0 0 0 11 19.93V21h2v-1.07A8 8 0 0 0 19.93 13H21v-2zm-9 7a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="selectbar" id="selectbar">
+        <div class="sinfo">
+          <div class="sname" id="selName">—</div>
+          <div class="sdist" id="selDist">—</div>
+        </div>
+        <button id="selConfirm" type="button">降車に設定</button>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="locToast"></div>
 </div>
 
 <script>
@@ -500,6 +739,257 @@ function esc(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ===== 目的地から（施設検索 → 近いバス停） =====
+const PS_DEBOUNCE = 500;       // Nominatimは1秒1リクエスト制限のためデバウンス
+const psCache = new Map();     // 検索語 → 結果（同じ語の再リクエストを避ける）
+let psTimer = null, psAbort = null, psViewbox = null;
+let facility = null;           // {name, lat, lon}
+let nearStops = [];            // [{gi, si, d}] 近い順5件
+let selStop = null;
+let locMap = null, stopMarkers = [], destMarker = null;
+let locView = "list", locToastTimer = null;
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000, rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function walkMin(m) { return Math.max(1, Math.ceil(m / 80)); }
+function distLabel(m) { return "約" + Math.max(10, Math.round(m / 10) * 10) + "m"; }
+
+// 八戸市域のviewbox（全停留所の範囲＋余白）を lon1,lat1,lon2,lat2 で返す
+function hachiViewbox() {
+  if (psViewbox) return psViewbox;
+  let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+  for (const s of DATA.s) {
+    if (!s[2]) continue;
+    minLat = Math.min(minLat, s[2]); maxLat = Math.max(maxLat, s[2]);
+    minLon = Math.min(minLon, s[3]); maxLon = Math.max(maxLon, s[3]);
+  }
+  const m = 0.03;
+  psViewbox = (minLon - m) + "," + (maxLat + m) + "," + (maxLon + m) + "," + (minLat - m);
+  return psViewbox;
+}
+
+async function searchPlaces(q) {
+  if (psCache.has(q)) return psCache.get(q);
+  if (psAbort) psAbort.abort();
+  psAbort = new AbortController();
+  const url = "https://nominatim.openstreetmap.org/search?format=json&limit=8&accept-language=ja" +
+    "&bounded=1&viewbox=" + hachiViewbox() + "&q=" + encodeURIComponent(q);
+  const res = await fetch(url, { signal: psAbort.signal });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const list = await res.json();
+  psCache.set(q, list);
+  return list;
+}
+
+function nearestGroups(lat, lon, n) {
+  const best = new Map(); // グループidx → 最寄りのりば
+  DATA.s.forEach((s, si) => {
+    if (!s[2]) return;
+    const d = haversine(lat, lon, s[2], s[3]);
+    const cur = best.get(s[0]);
+    if (!cur || d < cur.d) best.set(s[0], { d, si });
+  });
+  return [...best.entries()].map(([gi, v]) => ({ gi, si: v.si, d: v.d }))
+    .sort((a, b) => a.d - b.d).slice(0, n);
+}
+
+const pinSvg = '<svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>';
+
+function showSug(html) { const b = $("#psSuggest"); b.innerHTML = html; b.classList.add("show"); }
+function hideSug() { $("#psSuggest").classList.remove("show"); }
+
+function renderSug(list) {
+  if (!list.length) {
+    showSug('<div class="noresult">見つかりませんでした。別の言い方も試してください</div>');
+    return;
+  }
+  const box = $("#psSuggest");
+  box.innerHTML = "";
+  list.forEach(r => {
+    const name = (r.name || r.display_name.split(",")[0]).trim();
+    const kind = (r.display_name.split(",")[1] || "").trim();
+    const row = document.createElement("div");
+    row.className = "sugrow";
+    row.innerHTML = pinSvg + "<span>" + esc(name) + '</span><span class="kind">' + esc(kind) + "</span>";
+    row.addEventListener("click", () => chooseFacility(name, +r.lat, +r.lon));
+    box.appendChild(row);
+  });
+  box.classList.add("show");
+}
+
+function chooseFacility(name, lat, lon) {
+  facility = { name, lat, lon };
+  $("#psInput").value = name;
+  hideSug();
+  $("#psClear").classList.add("show");
+  nearStops = nearestGroups(lat, lon, 5);
+  selStop = null;
+  $("#selectbar").classList.remove("show");
+  $("#sheetNote").innerHTML = "<b>「" + esc(name) + "」</b>の近くのバス停を表示中";
+  $("#viewToggle").classList.add("show");
+  renderStopList();
+  setLocView("map");   // 施設選択後は地図で位置を見せる（モック準拠）
+  updateLocMap();
+}
+
+function renderStopList() {
+  const box = $("#stoplist");
+  box.innerHTML = "";
+  nearStops.forEach(ns => {
+    const name = DATA.g[ns.gi][0];
+    const row = document.createElement("div");
+    row.className = "stoprow";
+    row.innerHTML =
+      '<div class="pin">' + pinSvg + "</div>" +
+      '<div class="info"><div class="name">' + esc(name) + '</div><div class="plat">のりば' +
+        stopsOfGroup[ns.gi].length + "か所</div></div>" +
+      '<div class="dist"><div class="m num">' + distLabel(ns.d) + '</div><div class="walk">徒歩' +
+        walkMin(ns.d) + "分</div></div>";
+    row.addEventListener("click", () => applyDestStop(name));
+    box.appendChild(row);
+  });
+}
+
+function applyDestStop(name) {
+  state.to = name;
+  $("#toInput").value = name;
+  saveState();
+  closeLocSheet();
+  renderResults();
+  const t = $("#locToast");
+  t.textContent = "降車バス停を「" + name + "」に設定しました";
+  t.classList.add("show");
+  clearTimeout(locToastTimer);
+  locToastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// --- Leaflet 地図 ---
+function stopIcon(name, closest, selected) {
+  return L.divIcon({ className: "", iconSize: [0, 0], html:
+    '<div class="mpin' + (closest ? " closest" : "") + (selected ? " selected" : "") +
+    '"><div class="mdot">B</div><div class="mlabel">' + esc(name) + "</div></div>" });
+}
+function destIcon(name) {
+  return L.divIcon({ className: "", iconSize: [0, 0], html:
+    '<div class="dpin"><svg width="30" height="40" viewBox="0 0 30 40">' +
+    '<path d="M15 40 C9 30 3 24 3 14 a12 12 0 1 1 24 0 c0 10 -6 16 -12 26z" fill="#E0503A" stroke="#fff" stroke-width="2"/>' +
+    '<circle cx="15" cy="14" r="4.5" fill="#fff"/></svg>' +
+    '<div class="dlabel">' + esc(name) + "</div></div>" });
+}
+function ensureLocMap() {
+  if (locMap || typeof L === "undefined") return;
+  locMap = L.map("locMap", { zoomControl: false });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(locMap);
+  $("#zoomIn").addEventListener("click", () => locMap.zoomIn());
+  $("#zoomOut").addEventListener("click", () => locMap.zoomOut());
+  $("#recenter").addEventListener("click", () => {
+    if (facility) locMap.setView([facility.lat, facility.lon], 16);
+  });
+}
+function updateLocMap() {
+  ensureLocMap();
+  if (!locMap) return;
+  stopMarkers.forEach(m => locMap.removeLayer(m));
+  stopMarkers = [];
+  if (destMarker) { locMap.removeLayer(destMarker); destMarker = null; }
+  if (!facility) return;
+  destMarker = L.marker([facility.lat, facility.lon],
+    { icon: destIcon(facility.name), interactive: false, zIndexOffset: 1000 }).addTo(locMap);
+  nearStops.forEach((ns, i) => {
+    const s = DATA.s[ns.si];
+    const mk = L.marker([s[2], s[3]], { icon: stopIcon(DATA.g[ns.gi][0], i === 0, false) }).addTo(locMap);
+    mk.on("click", () => selectStopPin(ns));
+    stopMarkers.push(mk);
+  });
+  locMap.setView([facility.lat, facility.lon], 16);
+  setTimeout(() => locMap.invalidateSize(), 0);
+}
+function selectStopPin(ns) {
+  selStop = ns;
+  stopMarkers.forEach((mk, i) =>
+    mk.setIcon(stopIcon(DATA.g[nearStops[i].gi][0], i === 0, nearStops[i] === ns)));
+  $("#selName").textContent = DATA.g[ns.gi][0];
+  $("#selDist").textContent = "「" + facility.name + "」から" + distLabel(ns.d) +
+    "・徒歩" + walkMin(ns.d) + "分（のりば" + stopsOfGroup[ns.gi].length + "か所）";
+  $("#selectbar").classList.add("show");
+}
+
+function setLocView(v) {
+  locView = v;
+  document.querySelectorAll("#viewToggle button").forEach(b =>
+    b.classList.toggle("active", b.dataset.view === v));
+  $("#stoplist").classList.toggle("show", v === "list");
+  $("#mapview").classList.toggle("show", v === "map");
+  if (v === "map" && locMap) setTimeout(() => locMap.invalidateSize(), 0);
+}
+
+function openLocSheet() {
+  if (!DATA) return;
+  $("#locOverlay").classList.add("show");
+  $("#locSheet").classList.add("show");
+  if (!facility) $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
+  $("#psInput").focus();
+}
+function closeLocSheet() {
+  $("#locOverlay").classList.remove("show");
+  $("#locSheet").classList.remove("show");
+  hideSug();
+}
+
+function bindLocSheet() {
+  $("#destBtn").addEventListener("click", openLocSheet);
+  $("#locOverlay").addEventListener("click", closeLocSheet);
+  $("#viewToggle").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (b) setLocView(b.dataset.view);
+  });
+  $("#selConfirm").addEventListener("click", () => {
+    if (selStop) applyDestStop(DATA.g[selStop.gi][0]);
+  });
+  $("#psClear").addEventListener("click", () => {
+    $("#psInput").value = "";
+    $("#psClear").classList.remove("show");
+    hideSug();
+    facility = null; nearStops = []; selStop = null;
+    $("#viewToggle").classList.remove("show");
+    $("#selectbar").classList.remove("show");
+    $("#stoplist").classList.remove("show");
+    $("#mapview").classList.remove("show");
+    $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
+    $("#psInput").focus();
+  });
+  const runSearch = async q => {
+    showSug('<div class="noresult">検索中…</div>');
+    try {
+      renderSug(await searchPlaces(q));
+    } catch (e) {
+      if (e.name !== "AbortError")
+        showSug('<div class="noresult">検索に失敗しました。通信環境を確認してください</div>');
+    }
+  };
+  $("#psInput").addEventListener("input", () => {
+    const q = $("#psInput").value.trim();
+    $("#psClear").classList.toggle("show", q.length > 0);
+    clearTimeout(psTimer);
+    if (q.length < 2) { hideSug(); return; }
+    psTimer = setTimeout(() => runSearch(q), PS_DEBOUNCE);
+  });
+  $("#psInput").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      const q = $("#psInput").value.trim();
+      if (q.length >= 2) { clearTimeout(psTimer); runSearch(q); }
+    }
+  });
+}
+
 // ===== ヘッダー・警告 =====
 function renderHeader() {
   const d = new Date();
@@ -596,6 +1086,7 @@ async function main() {
   attachSuggest("#fromInput", "#fromSuggest", "from");
   attachSuggest("#toInput", "#toSuggest", "to");
   bindTabs();
+  bindLocSheet();
   applyStateToUI();
   render();
 

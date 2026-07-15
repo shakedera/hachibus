@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>はちバス — 現在地・施設検索 UIモック v4</title>
+<style>
+  :root{
+    --bus-blue:#1565C0;
+    --bus-blue-deep:#0D47A1;
+    --amber:#FFB300;
+    --dest-red:#E0503A;
+    --ink:#1C2733;
+    --sub:#5D6B7A;
+    --line:#E3E9F0;
+    --bg:#F1F4F8;
+    --card:#FFFFFF;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{
+    background:#D9E1EA;
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    color:var(--ink);
+    display:flex;justify-content:center;
+    min-height:100vh;padding:16px 0;
+  }
+  .phone{
+    width:375px;max-width:100%;
+    background:var(--bg);
+    min-height:820px;
+    border-radius:24px;
+    overflow:hidden;
+    position:relative;
+    box-shadow:0 8px 40px rgba(13,71,161,.18);
+  }
+
+  header{
+    background:var(--card);
+    padding:14px 16px 12px;
+    display:flex;align-items:baseline;gap:8px;
+    border-bottom:1px solid var(--line);
+  }
+  header .app{font-size:18px;font-weight:800;color:var(--bus-blue-deep);letter-spacing:.02em;}
+  header .sub{font-size:11px;color:var(--sub);}
+
+  main{padding:12px 12px 90px;}
+
+  .nextcard{
+    background:linear-gradient(135deg,#1E6FD9 0%,var(--bus-blue-deep) 100%);
+    border-radius:16px;color:#fff;
+    padding:14px 16px;margin-bottom:12px;
+    box-shadow:0 4px 14px rgba(13,71,161,.25);
+  }
+  .nextcard .route{font-size:12.5px;opacity:.92;display:flex;align-items:center;gap:6px;}
+  .nextcard .route .arrow{color:var(--amber);font-size:11px;}
+  .nextcard .main{display:flex;align-items:baseline;gap:8px;margin-top:6px;}
+  .nextcard .time{font-size:30px;font-weight:800;letter-spacing:.02em;}
+  .nextcard .count{font-size:13px;background:rgba(255,255,255,.16);padding:3px 10px;border-radius:999px;}
+
+  .searchcard{
+    background:var(--card);border-radius:16px;
+    padding:14px;border:1px solid var(--line);
+  }
+  .field{display:flex;align-items:center;gap:10px;padding:10px 0;}
+  .field + .field{border-top:1px dashed var(--line);}
+  .tag{
+    flex:none;font-size:11px;font-weight:700;color:#fff;
+    background:var(--bus-blue);border-radius:6px;
+    padding:4px 8px;letter-spacing:.08em;
+  }
+  .tag.off{background:#78909C;}
+  .field input{
+    flex:1;border:none;outline:none;font-size:15.5px;
+    color:var(--ink);background:transparent;min-width:0;
+  }
+  .field input::placeholder{color:#A6B2BF;}
+
+  .locbtn{
+    flex:none;display:flex;align-items:center;gap:5px;
+    border:1.5px solid var(--bus-blue);color:var(--bus-blue);
+    background:#fff;border-radius:999px;
+    font-size:12px;font-weight:700;
+    padding:6px 11px;cursor:pointer;
+    transition:background .15s;
+  }
+  .locbtn:active{background:#E3F0FD;}
+  .locbtn svg{width:13px;height:13px;fill:var(--bus-blue);}
+
+  .swap{display:flex;justify-content:center;margin:-4px 0;}
+  .swap button{
+    border:1px solid var(--line);background:#fff;color:var(--sub);
+    width:32px;height:32px;border-radius:50%;font-size:14px;cursor:pointer;
+    position:relative;z-index:1;
+  }
+
+  .daytabs{display:flex;margin:14px 4px 0;}
+  .daytab{
+    flex:1;text-align:center;font-size:13.5px;color:var(--sub);
+    padding:9px 0;border-bottom:2px solid var(--line);cursor:pointer;font-weight:600;
+  }
+  .daytab.active{color:var(--bus-blue-deep);border-bottom-color:var(--bus-blue);}
+
+  /* ===== ボトムシート ===== */
+  .overlay{
+    position:absolute;inset:0;background:rgba(16,32,54,.42);
+    opacity:0;pointer-events:none;transition:opacity .22s;z-index:10;
+  }
+  .overlay.show{opacity:1;pointer-events:auto;}
+  .sheet{
+    position:absolute;left:0;right:0;bottom:0;z-index:11;
+    background:var(--card);border-radius:20px 20px 0 0;
+    padding:10px 16px 18px;
+    transform:translateY(105%);transition:transform .28s cubic-bezier(.32,.72,.2,1);
+    box-shadow:0 -6px 30px rgba(13,71,161,.2);
+  }
+  .sheet.show{transform:translateY(0);}
+  .handle{width:38px;height:4px;border-radius:2px;background:#CBD5E0;margin:2px auto 12px;}
+  .sheethead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .sheet h2{
+    font-size:15px;font-weight:800;color:var(--ink);
+    display:flex;align-items:center;gap:7px;
+  }
+  .sheet h2 svg{width:16px;height:16px;fill:var(--bus-blue);}
+  .viewtoggle{
+    display:none;flex:none;
+    background:#EDF2F7;border-radius:999px;padding:3px;
+  }
+  .viewtoggle.show{display:flex;}
+  .viewtoggle button{
+    border:none;background:none;color:var(--sub);
+    font-size:12px;font-weight:700;
+    padding:5px 14px;border-radius:999px;cursor:pointer;
+    transition:all .15s;
+  }
+  .viewtoggle button.active{background:var(--bus-blue);color:#fff;}
+
+  /* 施設検索ボックス（新規） */
+  .placesearch{display:none;position:relative;margin-bottom:8px;}
+  .placesearch.show{display:block;}
+  .psrow{
+    display:flex;align-items:center;gap:8px;
+    border:1.5px solid var(--line);border-radius:12px;
+    padding:9px 12px;background:#FAFCFE;
+  }
+  .psrow:focus-within{border-color:var(--bus-blue);}
+  .psrow svg{flex:none;width:15px;height:15px;fill:#8A97A5;}
+  .psrow input{
+    flex:1;border:none;outline:none;background:transparent;
+    font-size:14px;color:var(--ink);min-width:0;
+  }
+  .psrow input::placeholder{color:#A6B2BF;}
+  .psrow .clear{
+    flex:none;display:none;border:none;background:#DDE5EC;color:var(--sub);
+    width:20px;height:20px;border-radius:50%;font-size:11px;cursor:pointer;line-height:1;
+  }
+  .psrow .clear.show{display:block;}
+  .suggest{
+    position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;
+    background:#fff;border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 6px 20px rgba(13,71,161,.14);
+    overflow:hidden;display:none;
+  }
+  .suggest.show{display:block;}
+  .sugrow{
+    display:flex;align-items:center;gap:10px;
+    padding:11px 13px;cursor:pointer;font-size:14px;
+    border-bottom:1px solid #F0F4F8;
+  }
+  .sugrow:last-child{border-bottom:none;}
+  .sugrow:active{background:#F4F8FC;}
+  .sugrow svg{flex:none;width:14px;height:14px;fill:var(--dest-red);}
+  .sugrow .kind{margin-left:auto;font-size:10.5px;color:var(--sub);}
+  .noresult{padding:12px 13px;font-size:12.5px;color:var(--sub);}
+
+  .sheet .note{font-size:11.5px;color:var(--sub);margin-bottom:8px;min-height:16px;}
+  .sheet .note b{color:var(--dest-red);font-weight:800;}
+
+  .loading{display:none;padding:30px 0 26px;text-align:center;}
+  .loading.show{display:block;}
+  .radar{
+    width:44px;height:44px;margin:0 auto 12px;border-radius:50%;
+    border:3px solid #E3F0FD;border-top-color:var(--bus-blue);
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .loading p{font-size:13px;color:var(--sub);}
+
+  .stoplist{display:none;}
+  .stoplist.show{display:block;}
+  .stoprow{
+    display:flex;align-items:center;gap:12px;
+    padding:11px 2px;border-bottom:1px solid var(--line);cursor:pointer;
+  }
+  .stoprow:last-child{border-bottom:none;}
+  .stoprow:active{background:#F4F8FC;}
+  .stoprow .pin{
+    flex:none;width:34px;height:34px;border-radius:50%;
+    background:#E3F0FD;display:flex;align-items:center;justify-content:center;
+  }
+  .stoprow .pin svg{width:15px;height:15px;fill:var(--bus-blue);}
+  .stoprow:first-of-type .pin{background:var(--amber);}
+  .stoprow:first-of-type .pin svg{fill:#fff;}
+  .stoprow .info{flex:1;min-width:0;}
+  .stoprow .name{font-size:15px;font-weight:700;}
+  .stoprow .plat{font-size:11px;color:var(--sub);margin-top:2px;}
+  .stoprow .dist{flex:none;text-align:right;}
+  .stoprow .dist .m{font-size:14px;font-weight:800;color:var(--bus-blue-deep);}
+  .stoprow .dist .walk{font-size:10.5px;color:var(--sub);margin-top:2px;}
+
+  /* ===== 地図ビュー ===== */
+  .mapview{display:none;}
+  .mapview.show{display:block;}
+  .mapbox{
+    border-radius:14px;overflow:hidden;
+    border:1px solid var(--line);
+    position:relative;
+  }
+  .mapbox svg{
+    display:block;width:100%;height:auto;
+    touch-action:none;cursor:grab;
+  }
+  .mapbox svg.dragging{cursor:grabbing;}
+  .mappin{cursor:pointer;}
+  .mappin circle.body{fill:var(--bus-blue);transition:fill .15s;}
+  .mappin.closest circle.body{fill:var(--amber);}
+  .mappin.selected circle.body{fill:var(--amber);}
+  .mappin text{
+    font-size:10px;font-weight:700;fill:#37474F;
+    paint-order:stroke;stroke:#FFFFFF;stroke-width:3px;stroke-linejoin:round;
+    pointer-events:none;
+  }
+  #dest text{
+    font-size:10px;font-weight:800;fill:var(--dest-red);
+    paint-order:stroke;stroke:#FFFFFF;stroke-width:3px;stroke-linejoin:round;
+  }
+  @keyframes pulse{
+    0%{r:9;opacity:.55;}
+    70%{r:20;opacity:0;}
+    100%{r:20;opacity:0;}
+  }
+  .mepulse{animation:pulse 2s ease-out infinite;}
+  .maphint{
+    position:absolute;top:8px;left:8px;
+    background:rgba(255,255,255,.92);border-radius:8px;
+    font-size:10.5px;color:var(--sub);font-weight:600;
+    padding:5px 9px;pointer-events:none;
+  }
+  .mapctrl{
+    position:absolute;right:8px;bottom:8px;
+    display:flex;flex-direction:column;gap:6px;
+  }
+  .mapctrl button{
+    width:34px;height:34px;border-radius:10px;
+    border:1px solid var(--line);background:rgba(255,255,255,.95);
+    color:var(--ink);font-size:17px;font-weight:700;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 1px 4px rgba(13,71,161,.12);
+  }
+  .mapctrl button:active{background:#E3F0FD;}
+  .mapctrl button svg{width:17px;height:17px;fill:var(--bus-blue);}
+
+  .selectbar{
+    display:none;align-items:center;gap:10px;
+    margin-top:10px;padding:10px 12px;
+    background:#F4F8FC;border:1px solid #CFE3F7;border-radius:12px;
+  }
+  .selectbar.show{display:flex;}
+  .selectbar .sinfo{flex:1;min-width:0;}
+  .selectbar .sname{font-size:14.5px;font-weight:800;}
+  .selectbar .sdist{font-size:11px;color:var(--sub);margin-top:1px;}
+  .selectbar button{
+    flex:none;border:none;background:var(--bus-blue);color:#fff;
+    font-size:13px;font-weight:700;border-radius:999px;
+    padding:9px 18px;cursor:pointer;
+  }
+  .selectbar button:active{background:var(--bus-blue-deep);}
+
+  .locerror{display:none;padding:22px 6px 8px;text-align:center;}
+  .locerror.show{display:block;}
+  .locerror .icon{font-size:30px;margin-bottom:8px;}
+  .locerror h3{font-size:14.5px;font-weight:800;margin-bottom:6px;}
+  .locerror p{font-size:12.5px;color:var(--sub);line-height:1.65;margin-bottom:14px;}
+  .locerror button{
+    border:none;background:var(--bus-blue);color:#fff;
+    font-size:13.5px;font-weight:700;border-radius:999px;
+    padding:10px 26px;cursor:pointer;
+  }
+
+  .toast{
+    position:absolute;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);
+    background:#26313D;color:#fff;font-size:12.5px;font-weight:600;
+    padding:10px 18px;border-radius:999px;white-space:nowrap;
+    opacity:0;pointer-events:none;transition:all .25s;z-index:20;
+    max-width:92%;overflow:hidden;text-overflow:ellipsis;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  .demo{margin-top:18px;text-align:center;}
+  .demo button{
+    border:none;background:none;color:var(--sub);
+    font-size:11px;text-decoration:underline;cursor:pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;animation:none !important;}
+  }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <header>
+    <span class="app">はちバス</span>
+    <span class="sub">八戸市営バス 時刻表</span>
+  </header>
+
+  <main>
+    <div class="nextcard">
+      <div class="route">定番 <span class="arrow">▶</span> 廿三日町 → 本八戸駅</div>
+      <div class="main">
+        <span class="time">19:42</span>
+        <span class="count">あと 14分</span>
+      </div>
+    </div>
+
+    <div class="searchcard">
+      <div class="field">
+        <span class="tag">乗車</span>
+        <input id="fromInput" type="text" placeholder="バス停名を入力" value="">
+        <button class="locbtn" id="locBtn">
+          <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+          現在地から
+        </button>
+      </div>
+      <div class="swap"><button title="乗車と降車を入れ替え">⇅</button></div>
+      <div class="field">
+        <span class="tag off">降車</span>
+        <input id="toInput" type="text" placeholder="バス停名を入力" value="">
+        <button class="locbtn" id="destBtn">
+          <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+          目的地から
+        </button>
+      </div>
+    </div>
+
+    <div class="daytabs">
+      <div class="daytab active">平日</div>
+      <div class="daytab">土曜</div>
+      <div class="daytab">日祝</div>
+    </div>
+
+    <div class="demo">
+      <button id="demoError">デモ：位置情報がオフのときの表示を見る</button>
+    </div>
+  </main>
+
+  <!-- ボトムシート -->
+  <div class="overlay" id="overlay"></div>
+  <div class="sheet" id="sheet">
+    <div class="handle"></div>
+    <div class="sheethead">
+      <h2 id="sheetTitle">
+        <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+        <span id="titleText">現在地から近いバス停</span>
+      </h2>
+      <div class="viewtoggle" id="viewToggle">
+        <button class="active" data-view="list">リスト</button>
+        <button data-view="map">地図</button>
+      </div>
+    </div>
+
+    <!-- 施設検索（新規） -->
+    <div class="placesearch" id="placesearch">
+      <div class="psrow">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+        <input id="psInput" type="text" placeholder="施設名で検索（例：はっち・市庁）" autocomplete="off">
+        <button class="clear" id="psClear">✕</button>
+      </div>
+      <div class="suggest" id="suggest"></div>
+    </div>
+
+    <p class="note" id="sheetNote"></p>
+
+    <div class="loading" id="loading">
+      <div class="radar"></div>
+      <p>位置情報を取得中…</p>
+    </div>
+
+    <!-- リストビュー -->
+    <div class="stoplist" id="stoplist"></div>
+
+    <!-- 地図ビュー -->
+    <div class="mapview" id="mapview">
+      <div class="mapbox">
+        <svg id="mapsvg" viewBox="138 105 343 240" xmlns="http://www.w3.org/2000/svg">
+          <rect x="-100" y="-100" width="800" height="650" fill="#E9E6DD"/>
+          <rect x="0" y="0" width="600" height="450" fill="#EFEDE6"/>
+          <g fill="#E6E3D9">
+            <rect x="20"  y="20"  width="110" height="160" rx="4"/>
+            <rect x="170" y="20"  width="70"  height="160" rx="4"/>
+            <rect x="280" y="20"  width="70"  height="160" rx="4"/>
+            <rect x="390" y="20"  width="60"  height="160" rx="4"/>
+            <rect x="490" y="20"  width="90"  height="160" rx="4"/>
+            <rect x="20"  y="230" width="110" height="55"  rx="4"/>
+            <rect x="170" y="230" width="70"  height="55"  rx="4"/>
+            <rect x="280" y="230" width="70"  height="55"  rx="4"/>
+            <rect x="390" y="230" width="60"  height="55"  rx="4"/>
+            <rect x="490" y="230" width="90"  height="55"  rx="4"/>
+            <rect x="20"  y="335" width="110" height="95"  rx="4"/>
+            <rect x="170" y="335" width="70"  height="95"  rx="4"/>
+            <rect x="280" y="335" width="70"  height="95"  rx="4"/>
+            <rect x="390" y="335" width="190" height="95"  rx="4"/>
+          </g>
+          <rect x="392" y="24" width="56" height="70" rx="6" fill="#CFE5C4"/>
+          <rect x="284" y="340" width="62" height="52" rx="6" fill="#CFE5C4"/>
+          <g stroke="#D9D5C9" fill="none">
+            <path d="M-100 205 L700 200" stroke-width="24"/>
+            <path d="M-100 312 L700 316" stroke-width="17"/>
+            <path d="M150 -100 L148 550" stroke-width="17"/>
+            <path d="M260 -100 L258 550" stroke-width="14"/>
+            <path d="M370 -100 L368 550" stroke-width="14"/>
+            <path d="M470 -100 L472 550" stroke-width="14"/>
+            <path d="M60 -100 L58 550" stroke-width="12"/>
+          </g>
+          <g stroke="#FFFFFF" fill="none">
+            <path d="M-100 205 L700 200" stroke-width="17"/>
+            <path d="M-100 312 L700 316" stroke-width="12"/>
+            <path d="M150 -100 L148 550" stroke-width="12"/>
+            <path d="M260 -100 L258 550" stroke-width="10"/>
+            <path d="M370 -100 L368 550" stroke-width="10"/>
+            <path d="M470 -100 L472 550" stroke-width="10"/>
+            <path d="M60 -100 L58 550" stroke-width="8"/>
+          </g>
+          <text x="520" y="196" style="font-size:9px;fill:#9AA5B1;font-weight:600;">三日町通り</text>
+          <!-- 現在地 -->
+          <g id="me">
+            <circle class="mepulse" cx="310" cy="235" r="9" fill="none" stroke="#1565C0" stroke-width="2"/>
+            <circle cx="310" cy="235" r="7" fill="#1565C0" stroke="#FFFFFF" stroke-width="2.5"/>
+          </g>
+          <!-- 目的地マーカー（施設検索時のみ表示） -->
+          <g id="dest" style="display:none;">
+            <path id="destPath" d="" fill="#E0503A" stroke="#FFFFFF" stroke-width="1.5"/>
+            <circle id="destDot" r="3" fill="#FFFFFF"/>
+            <text id="destLabel" text-anchor="middle"></text>
+          </g>
+          <g id="pins"></g>
+        </svg>
+        <div class="maphint">ドラッグで移動・ピンチで拡大</div>
+        <div class="mapctrl">
+          <button id="zoomIn" title="拡大">＋</button>
+          <button id="zoomOut" title="縮小">−</button>
+          <button id="recenter" title="基準点に戻る">
+            <svg viewBox="0 0 24 24"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 3h-1.07A8 8 0 0 0 13 4.07V3h-2v1.07A8 8 0 0 0 4.07 11H3v2h1.07A8 8 0 0 0 11 19.93V21h2v-1.07A8 8 0 0 0 19.93 13H21v-2zm-9 7a6 6 0 1 1 0-12 6 6 0 0 1 0 12z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="selectbar" id="selectbar">
+        <div class="sinfo">
+          <div class="sname" id="selName">—</div>
+          <div class="sdist" id="selDist">—</div>
+        </div>
+        <button id="selConfirm">乗車に設定</button>
+      </div>
+    </div>
+
+    <div class="locerror" id="locerror">
+      <div class="icon">📍</div>
+      <h3>位置情報を利用できません</h3>
+      <p>ブラウザの設定で位置情報が許可されていません。<br>iPhoneの場合：設定 → Safari → 位置情報 から<br>「確認」または「許可」を選んでください。</p>
+      <button id="errClose">閉じる</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+  /* ==== モックデータ（実装時は data.json + ジオコーディング） ==== */
+  const SCALE = 1.9; // SVG 1単位 ≒ 1.9m（モック用換算）
+  const stops = [
+    {name:'廿三日町', plat:'のりば 2か所', x:345, y:203},
+    {name:'十三日町', plat:'のりば 2か所', x:285, y:204},
+    {name:'三日町',   plat:'のりば 3か所', x:225, y:205},
+    {name:'六日町',   plat:'のりば 2か所', x:250, y:313},
+    {name:'八日町',   plat:'のりば 2か所', x:168, y:206},
+    {name:'朔日町',   plat:'のりば 1か所', x:60,  y:208},
+    {name:'塩町',     plat:'のりば 1か所', x:470, y:318},
+  ];
+  const facilities = [
+    {name:'はっち（八戸ポータルミュージアム）', kana:'はっち', kind:'文化施設', x:258, y:180},
+    {name:'マチニワ', kana:'まちにわ', kind:'広場', x:270, y:228},
+    {name:'八戸市庁', kana:'はちのへしちょう しやくしょ 市役所', kind:'官公庁', x:95, y:60},
+    {name:'更上閣', kana:'こうじょうかく', kind:'史跡', x:418, y:60},
+    {name:'八戸ブックセンター', kana:'ぶっくせんたー', kind:'書店', x:302, y:252},
+    {name:'チーノはちのへ', kana:'ちーの', kind:'商業施設', x:210, y:242},
+  ];
+  const ME = {x:310, y:235};
+
+  /* ==== 要素 ==== */
+  const overlay = document.getElementById('overlay');
+  const sheet = document.getElementById('sheet');
+  const loading = document.getElementById('loading');
+  const stoplist = document.getElementById('stoplist');
+  const mapview = document.getElementById('mapview');
+  const viewToggle = document.getElementById('viewToggle');
+  const sheetNote = document.getElementById('sheetNote');
+  const titleText = document.getElementById('titleText');
+  const locerror = document.getElementById('locerror');
+  const fromInput = document.getElementById('fromInput');
+  const toInput = document.getElementById('toInput');
+  const toast = document.getElementById('toast');
+  const selectbar = document.getElementById('selectbar');
+  const selName = document.getElementById('selName');
+  const selDist = document.getElementById('selDist');
+  const selConfirm = document.getElementById('selConfirm');
+  const placesearch = document.getElementById('placesearch');
+  const psInput = document.getElementById('psInput');
+  const psClear = document.getElementById('psClear');
+  const suggest = document.getElementById('suggest');
+
+  let toastTimer, selectedStop = null;
+  let currentView = 'list';
+  let targetField = 'from';          // 'from' | 'to'
+  let refPoint = {...ME, label:'現在地', isMe:true};
+
+  /* ==== 距離ユーティリティ ==== */
+  function distM(a, b){
+    const m = Math.hypot(a.x-b.x, a.y-b.y) * SCALE;
+    return Math.max(10, Math.round(m/10)*10);
+  }
+  function walkMin(m){ return Math.max(1, Math.ceil(m/80)); }
+  function nearby(ref, n=5){
+    return stops
+      .map(s=>({ ...s, m:distM(ref,s) }))
+      .sort((a,b)=>a.m-b.m)
+      .slice(0,n);
+  }
+
+  /* ==== リスト描画 ==== */
+  const pinSvg = '<svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>';
+  function renderList(){
+    stoplist.innerHTML = '';
+    nearby(refPoint).forEach(s=>{
+      const row = document.createElement('div');
+      row.className = 'stoprow';
+      row.innerHTML =
+        '<div class="pin">'+pinSvg+'</div>'+
+        '<div class="info"><div class="name">'+s.name+'</div><div class="plat">'+s.plat+'</div></div>'+
+        '<div class="dist"><div class="m">約'+s.m+'m</div><div class="walk">徒歩'+walkMin(s.m)+'分</div></div>';
+      row.addEventListener('click', ()=>applyStop(s));
+      stoplist.appendChild(row);
+    });
+  }
+
+  /* ==== 地図ピン ==== */
+  const NS = 'http://www.w3.org/2000/svg';
+  const pinsG = document.getElementById('pins');
+  const pinEls = new Map();
+  stops.forEach(s=>{
+    const g = document.createElementNS(NS,'g');
+    g.setAttribute('class','mappin');
+    const ring = document.createElementNS(NS,'circle');
+    ring.setAttribute('cx',s.x); ring.setAttribute('cy',s.y);
+    ring.setAttribute('r',13); ring.setAttribute('fill','#FFFFFF');
+    const body = document.createElementNS(NS,'circle');
+    body.setAttribute('class','body');
+    body.setAttribute('cx',s.x); body.setAttribute('cy',s.y); body.setAttribute('r',10);
+    const glyph = document.createElementNS(NS,'text');
+    glyph.setAttribute('x',s.x); glyph.setAttribute('y',s.y+3.5);
+    glyph.setAttribute('text-anchor','middle');
+    glyph.setAttribute('style','font-size:10px;fill:#fff;stroke:none;font-weight:800;pointer-events:none;');
+    glyph.textContent = 'B';
+    const label = document.createElementNS(NS,'text');
+    label.setAttribute('x',s.x); label.setAttribute('y',s.y+26);
+    label.setAttribute('text-anchor','middle');
+    label.textContent = s.name;
+    g.appendChild(ring); g.appendChild(body); g.appendChild(glyph); g.appendChild(label);
+    g.addEventListener('click', ()=>{
+      if(wasDragged) return;
+      selectPin(g, s);
+    });
+    pinsG.appendChild(g);
+    pinEls.set(s.name, g);
+  });
+  function refreshClosest(){
+    const first = nearby(refPoint,1)[0];
+    pinEls.forEach((g,name)=>g.classList.toggle('closest', name===first.name));
+  }
+
+  function selectPin(g, s){
+    document.querySelectorAll('.mappin').forEach(p=>p.classList.remove('selected'));
+    g.classList.add('selected');
+    const m = distM(refPoint, s);
+    selectedStop = s;
+    selName.textContent = s.name;
+    selDist.textContent = refPoint.label+'から約'+m+'m・徒歩'+walkMin(m)+'分（'+s.plat+'）';
+    selectbar.classList.add('show');
+  }
+  selConfirm.addEventListener('click', ()=>{
+    if(selectedStop) applyStop(selectedStop);
+  });
+
+  function applyStop(s){
+    const isFrom = targetField === 'from';
+    (isFrom ? fromInput : toInput).value = s.name;
+    closeSheet();
+    showToast((isFrom?'乗車':'降車')+'バス停を「'+s.name+'」に設定しました');
+  }
+
+  /* ==== 目的地マーカー ==== */
+  const destG = document.getElementById('dest');
+  function setDestMarker(f){
+    if(!f){ destG.style.display='none'; return; }
+    // ティアドロップ型ピン
+    const x=f.x, y=f.y;
+    document.getElementById('destPath').setAttribute('d',
+      'M'+x+' '+(y)+' c-6 -8 -9 -12 -9 -17 a9 9 0 1 1 18 0 c0 5 -3 9 -9 17 z');
+    const dot = document.getElementById('destDot');
+    dot.setAttribute('cx',x); dot.setAttribute('cy',y-17);
+    const lb = document.getElementById('destLabel');
+    lb.setAttribute('x',x); lb.setAttribute('y',y+13);
+    lb.textContent = f.kana ? f.name.split('（')[0] : f.name;
+    destG.style.display='';
+  }
+
+  /* ==== 施設検索 ==== */
+  psInput.addEventListener('input', ()=>{
+    const q = psInput.value.trim();
+    psClear.classList.toggle('show', q.length>0);
+    if(!q){ suggest.classList.remove('show'); return; }
+    const hits = facilities.filter(f=>
+      f.name.includes(q) || (f.kana && f.kana.includes(q))
+    );
+    suggest.innerHTML = '';
+    if(hits.length === 0){
+      suggest.innerHTML = '<div class="noresult">見つかりませんでした（実装時はOpenStreetMapの施設検索を使用）</div>';
+    }else{
+      hits.forEach(f=>{
+        const r = document.createElement('div');
+        r.className = 'sugrow';
+        r.innerHTML =
+          '<svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>'+
+          '<span>'+f.name+'</span><span class="kind">'+f.kind+'</span>';
+        r.addEventListener('click', ()=>chooseFacility(f));
+        suggest.appendChild(r);
+      });
+    }
+    suggest.classList.add('show');
+  });
+  psClear.addEventListener('click', ()=>{
+    psInput.value=''; psClear.classList.remove('show'); suggest.classList.remove('show');
+    setRef({...ME, label:'現在地', isMe:true});
+  });
+
+  function chooseFacility(f){
+    psInput.value = f.name.split('（')[0];
+    suggest.classList.remove('show');
+    psClear.classList.add('show');
+    setRef({x:f.x, y:f.y, label:'「'+f.name.split('（')[0]+'」', isMe:false, facility:f});
+    setView('map');           // 施設選択後は地図で位置を見せる
+    centerOn(f.x, f.y);
+  }
+
+  function setRef(ref){
+    refPoint = ref;
+    setDestMarker(ref.facility || null);
+    refreshClosest();
+    renderList();
+    selectbar.classList.remove('show');
+    document.querySelectorAll('.mappin').forEach(p=>p.classList.remove('selected'));
+    sheetNote.innerHTML = ref.isMe
+      ? (currentView==='list' ? 'タップすると'+(targetField==='from'?'乗車':'降車')+'バス停に設定します' : '青い点が現在地です')
+      : '<b>'+ref.label+'</b>の近くのバス停を表示中';
+  }
+
+  /* ==== 地図のパン・ズーム ==== */
+  const svg = document.getElementById('mapsvg');
+  const WORLD = {x:0, y:0, w:600, h:450};
+  const HOME  = {x:138, y:105, w:343, h:240};
+  const MIN_W = HOME.w / 3;
+  const MAX_W = WORLD.w;
+  let vb = {...HOME};
+  let wasDragged = false;
+  const pointers = new Map();
+  let lastDist = null, downPos = null;
+
+  function applyVB(){
+    const ratio = HOME.h / HOME.w;
+    vb.w = Math.min(Math.max(vb.w, MIN_W), MAX_W);
+    vb.h = vb.w * ratio;
+    vb.x = Math.min(Math.max(vb.x, WORLD.x - 40), WORLD.x + WORLD.w - vb.w + 40);
+    vb.y = Math.min(Math.max(vb.y, WORLD.y - 40), WORLD.y + WORLD.h - vb.h + 40);
+    svg.setAttribute('viewBox', vb.x+' '+vb.y+' '+vb.w+' '+vb.h);
+  }
+  function scaleOf(){ return vb.w / svg.clientWidth; }
+  function zoomAt(factor, cx, cy){
+    const newW = vb.w / factor;
+    const clampedW = Math.min(Math.max(newW, MIN_W), MAX_W);
+    const f = vb.w / clampedW;
+    vb.x = cx - (cx - vb.x) / f;
+    vb.y = cy - (cy - vb.y) / f;
+    vb.w = clampedW;
+    applyVB();
+  }
+  function centerOn(x, y){
+    vb.x = x - vb.w/2;
+    vb.y = y - vb.h/2;
+    applyVB();
+  }
+
+  svg.addEventListener('pointerdown', e=>{
+    svg.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    wasDragged = false;
+    downPos = {x:e.clientX, y:e.clientY};
+    if(pointers.size === 2){
+      const pts = [...pointers.values()];
+      lastDist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+    }
+  });
+  svg.addEventListener('pointermove', e=>{
+    if(!pointers.has(e.pointerId)) return;
+    const prev = pointers.get(e.pointerId);
+    pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    if(pointers.size === 1){
+      const dx = (e.clientX - prev.x) * scaleOf();
+      const dy = (e.clientY - prev.y) * scaleOf();
+      if(Math.hypot(e.clientX-downPos.x, e.clientY-downPos.y) > 6){
+        wasDragged = true;
+        svg.classList.add('dragging');
+      }
+      vb.x -= dx; vb.y -= dy;
+      applyVB();
+    }else if(pointers.size === 2){
+      wasDragged = true;
+      const pts = [...pointers.values()];
+      const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+      const mid  = {x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2};
+      if(lastDist){
+        const rect = svg.getBoundingClientRect();
+        const cx = vb.x + (mid.x - rect.left) * scaleOf();
+        const cy = vb.y + (mid.y - rect.top)  * scaleOf();
+        zoomAt(dist/lastDist, cx, cy);
+      }
+      lastDist = dist;
+    }
+  });
+  function endPointer(e){
+    pointers.delete(e.pointerId);
+    if(pointers.size < 2){ lastDist = null; }
+    if(pointers.size === 0){
+      svg.classList.remove('dragging');
+      setTimeout(()=>{ wasDragged = false; }, 50);
+    }
+  }
+  svg.addEventListener('pointerup', endPointer);
+  svg.addEventListener('pointercancel', endPointer);
+  svg.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const rect = svg.getBoundingClientRect();
+    const cx = vb.x + (e.clientX - rect.left) * scaleOf();
+    const cy = vb.y + (e.clientY - rect.top)  * scaleOf();
+    zoomAt(e.deltaY < 0 ? 1.15 : 1/1.15, cx, cy);
+  }, {passive:false});
+  document.getElementById('zoomIn').addEventListener('click', ()=>zoomAt(1.35, vb.x+vb.w/2, vb.y+vb.h/2));
+  document.getElementById('zoomOut').addEventListener('click', ()=>zoomAt(1/1.35, vb.x+vb.w/2, vb.y+vb.h/2));
+  document.getElementById('recenter').addEventListener('click', ()=>{
+    vb.w = HOME.w;
+    centerOn(refPoint.x, refPoint.y);
+  });
+
+  /* ==== ビュー切替 ==== */
+  viewToggle.querySelectorAll('button').forEach(b=>{
+    b.addEventListener('click', ()=>setView(b.dataset.view));
+  });
+  function setView(v){
+    currentView = v;
+    viewToggle.querySelectorAll('button').forEach(b=>{
+      b.classList.toggle('active', b.dataset.view === v);
+    });
+    stoplist.classList.toggle('show', v==='list');
+    mapview.classList.toggle('show', v==='map');
+    if(refPoint.isMe){
+      sheetNote.textContent = v==='list'
+        ? 'タップすると'+(targetField==='from'?'乗車':'降車')+'バス停に設定します'
+        : '青い点が現在地です';
+    }
+  }
+
+  /* ==== シート開閉 ==== */
+  function openSheet(mode, field){
+    targetField = field || 'from';
+    loading.classList.remove('show');
+    stoplist.classList.remove('show');
+    mapview.classList.remove('show');
+    locerror.classList.remove('show');
+    viewToggle.classList.remove('show');
+    placesearch.classList.remove('show');
+    selectbar.classList.remove('show');
+    document.querySelectorAll('.mappin').forEach(p=>p.classList.remove('selected'));
+    selectedStop = null;
+    psInput.value=''; psClear.classList.remove('show'); suggest.classList.remove('show');
+    selConfirm.textContent = targetField==='from' ? '乗車に設定' : '降車に設定';
+    titleText.textContent = targetField==='from' ? '現在地から近いバス停' : '目的地の近くのバス停';
+    overlay.classList.add('show');
+    sheet.classList.add('show');
+    sheetNote.textContent = '';
+
+    if(mode === 'search'){
+      loading.classList.add('show');
+      setTimeout(()=>{
+        loading.classList.remove('show');
+        viewToggle.classList.add('show');
+        placesearch.classList.add('show');
+        setRef({...ME, label:'現在地', isMe:true});
+        setView(targetField==='to' ? currentView : currentView);
+        vb.w = HOME.w; centerOn(ME.x, ME.y);
+        if(targetField==='to') psInput.focus();
+      }, 1200);
+    }else{
+      locerror.classList.add('show');
+    }
+  }
+  function closeSheet(){
+    overlay.classList.remove('show');
+    sheet.classList.remove('show');
+  }
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>toast.classList.remove('show'), 2200);
+  }
+
+  document.getElementById('locBtn').addEventListener('click', ()=>openSheet('search','from'));
+  document.getElementById('destBtn').addEventListener('click', ()=>openSheet('search','to'));
+  document.getElementById('demoError').addEventListener('click', ()=>openSheet('error'));
+  overlay.addEventListener('click', closeSheet);
+  document.getElementById('errClose').addEventListener('click', closeSheet);
+
+  document.querySelectorAll('.daytab').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      document.querySelectorAll('.daytab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

@@ -128,7 +128,13 @@ def main():
         if not groups[gi][1] and kana_by_stop.get(s["stop_id"]):
             groups[gi][1] = kana_by_stop[s["stop_id"]]
         stop_int[s["stop_id"]] = len(stops_out)
-        stops_out.append([gi, s.get("platform_code", "") or ""])
+        # 緯度経度は5桁丸め（約1m精度）。「目的地から」の距離計算に使う
+        try:
+            lat = round(float(s["stop_lat"]), 5)
+            lon = round(float(s["stop_lon"]), 5)
+        except (KeyError, ValueError):
+            lat = lon = 0
+        stops_out.append([gi, s.get("platform_code", "") or "", lat, lon])
 
     # --- trips: 行き先・系統番号 ---
     trips_meta = {}
@@ -197,7 +203,7 @@ def main():
         "ex": expires,            # ダイヤ有効期限 YYYYMMDD
         "hd": holiday_map,        # 例外日 YYYYMMDD → ダイヤ区分(0/1/2)
         "g": groups,              # バス停名グループ [名前, かな]
-        "s": stops_out,           # 停留所 [グループidx, のりば番号] （配列位置=連番ID）
+        "s": stops_out,           # 停留所 [グループidx, のりば番号, 緯度, 経度] （配列位置=連番ID）
         "b": badge_table,         # 系統番号文字列テーブル
         "h": head_table,          # 行き先文字列テーブル
         "t": trips_out,           # 便 [区分, 系統idx, 行き先idx, [停idx,出発分,出発-到着,...]]

@@ -1,6 +1,6 @@
 // はちバス時刻表 service worker（キャッシュファースト）
 // data.json を更新したら必ずこのバージョン番号を上げること
-const CACHE_NAME = "hachibus-v2";
+const CACHE_NAME = "hachibus-v3";
 
 const PRECACHE = [
   "./",
@@ -9,6 +9,8 @@ const PRECACHE = [
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
+  "./vendor/leaflet.js",
+  "./vendor/leaflet.css",
 ];
 
 self.addEventListener("install", (e) => {
