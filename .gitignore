@@ -2,3 +2,4 @@
 gtfs-private/
 # 私的利用の統合データ（端末取り込み用。公開しない）
 private-data.json
+gtfs-private*.zip

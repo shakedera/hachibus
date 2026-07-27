@@ -40,6 +40,32 @@ AGENCY_SHORT = {
 
 BADGE_RE = re.compile(r"^[\[［]([^\]］]+)[\]］]")
 
+# --- 事業者間の停留所名の表記揺れ吸収 ---
+# 中心街ターミナルの呼び方は3社3様:
+#   市営「八戸中心街ターミナル（八日町）」/ 南部「中心街ターミナル２番（八日町）」/
+#   十鉄「八戸中心街ターミナル八日町２番」 → すべて市営表記に名寄せ
+CENTER_LOCALITIES = ["三日町", "八日町", "中央通り", "朔日町", "六日町"]
+# 同一地点で名前が異なる停留所（完全一致でのみ適用）
+STOP_ALIAS = {
+    "八戸駅前": "八戸駅",              # 南部バス→市営名
+    "ラピアバスターミナル": "ラピアバスセンター",
+    "八戸市民病院": "市民病院",        # 十鉄→市営名
+}
+import unicodedata
+
+
+def normalize_stop_name(name):
+    """グループ化用の停留所名と、名前から拾えたのりば番号を返す"""
+    n = unicodedata.normalize("NFKC", name)
+    if "中心街ターミナル" in n:
+        for loc in CENTER_LOCALITIES:
+            if loc in n:
+                m = re.search(r"(\d+)番", n)
+                return f"八戸中心街ターミナル（{loc}）", (m.group(1) if m else "")
+    if name in STOP_ALIAS:
+        return STOP_ALIAS[name], ""
+    return name, ""
+
 
 def read_csv(zf, name):
     with zf.open(name) as f:
@@ -216,7 +242,7 @@ def build(zip_paths, out_path, label):
     stop_int = {}  # (feed_i, stop_id) → 連番int
     for fi, fd in enumerate(feeds):
         for sid, s in fd["stops"].items():
-            name = s["name"]
+            name, plat_extra = normalize_stop_name(s["name"])
             if name not in group_index:
                 group_index[name] = len(groups)
                 groups.append([name, fd["kana"].get(sid, "")])
@@ -229,7 +255,7 @@ def build(zip_paths, out_path, label):
             except ValueError:
                 lat = lon = 0
             stop_int[(fi, sid)] = len(stops_out)
-            stops_out.append([gi, s["platform"], lat, lon])
+            stops_out.append([gi, s["platform"] or plat_extra, lat, lon])
 
     # 便（区分が複数あるサービスは各区分に展開する）
     badge_table, badge_idx = [], {}
