@@ -187,6 +187,12 @@ footer .linkbtn{
   border:none;background:none;color:var(--blue);font-size:11.5px;
   text-decoration:underline;cursor:pointer;padding:2px 4px;
 }
+/* 限定運行ラベル（月水金・夏期・特定日など） */
+.svchip{
+  display:inline-block;font-size:10px;color:var(--sub);
+  border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:6px;
+  vertical-align:1px;
+}
 /* 事業者バッジ（複数事業者データのときのみ表示。色は車体色に合わせてJS側で指定） */
 .opchip{
   display:inline-block;font-size:10px;font-weight:700;color:#fff;
@@ -631,27 +637,112 @@ function opChip(t) {
 }
 
 // ===== 検索ロジック =====
+// 便の運行日判定（svテーブル: [曜日mask(月=bit0), start, end, 追加日[], 運休日[], ラベル]）
+function runsOn(svi, d) {
+  if (!DATA.sv || svi === undefined) return true;  // 旧形式データは毎日扱い
+  const sv = DATA.sv[svi];
+  if (!sv) return true;
+  const n = +ymd(d);
+  if (sv[3].includes(n)) return true;   // 追加日
+  if (sv[4].includes(n)) return false;  // 運休日
+  if (sv[1] && (n < sv[1] || n > sv[2])) return false;
+  return !!(sv[0] >> ((d.getDay() + 6) % 7) & 1);
+}
+function svLabel(svi) {
+  return (DATA.sv && DATA.sv[svi] && DATA.sv[svi][5]) || "";
+}
+// 乗降制限（tr[6]の疎リスト: 停位置p*2=乗車不可, p*2+1=降車不可）
+function restrSets(restr) {
+  if (!restr) return { noPu: null, noDo: null };
+  const noPu = new Set(), noDo = new Set();
+  for (const v of restr) (v & 1 ? noDo : noPu).add(v >> 1);
+  return { noPu, noDo };
+}
+
 // 乗車・降車グループを「その順序で」通る便を抽出（stop_sequence 順のデータを走査）
-function findTrips(fromGi, toGi, dia) {
+// todayOnly: 今日実際に走る便だけに絞る（次便カード・「今から」用）
+function findTrips(fromGi, toGi, dia, todayOnly) {
   const fa = new Set(stopsOfGroup[fromGi]), ta = new Set(stopsOfGroup[toGi]);
   const out = [];
+  const today = new Date();
   for (const tr of DATA.t) {
     const [cls, bi, hi, flat] = tr;
     if (cls !== dia) continue;
+    if (todayOnly && !runsOn(tr[5], today)) continue;
+    const { noPu, noDo } = restrSets(tr[6]);
     // 循環線対応: 乗車グループの全出現を候補にし、降車到着ごとに直近（=最短）の乗車を採用
     let pend = null;
     for (let k = 0; k < flat.length; k += 3) {
-      const si = flat[k], dep = flat[k + 1], dd = flat[k + 2];
-      if (fa.has(si)) {
+      const p = k / 3, si = flat[k], dep = flat[k + 1], dd = flat[k + 2];
+      if (fa.has(si) && !(noPu && noPu.has(p))) {
         pend = { dep, si };
-      } else if (pend && ta.has(si)) {
+      } else if (pend && ta.has(si) && !(noDo && noDo.has(p))) {
         out.push({ dep: pend.dep, arr: dep - dd, badge: DATA.b[bi], head: DATA.h[hi],
-                   fs: pend.si, ts: si, op: tr[4] || 0 });
+                   fs: pend.si, ts: si, op: tr[4] || 0, lbl: svLabel(tr[5]) });
         pend = null;
       }
     }
   }
   return out;
+}
+
+// 直通0便のときの参考情報: 同名バス停での乗換1回の候補（待ち3〜45分）
+function findTransfers(fromGi, toGi, dia, todayOnly) {
+  const fa = new Set(stopsOfGroup[fromGi]), ta = new Set(stopsOfGroup[toGi]);
+  const today = new Date();
+  const legs2 = new Map();   // 乗換グループidx → [{dep, arr, badge}]（乗換地→目的地）
+  for (const tr of DATA.t) {
+    if (tr[0] !== dia) continue;
+    if (todayOnly && !runsOn(tr[5], today)) continue;
+    const flat = tr[3], { noPu, noDo } = restrSets(tr[6]);
+    let seen = [];
+    for (let k = 0; k < flat.length; k += 3) {
+      const p = k / 3, si = flat[k], dep = flat[k + 1], dd = flat[k + 2];
+      if (ta.has(si) && !(noDo && noDo.has(p))) {
+        const arr = dep - dd;
+        for (const b of seen) {
+          if (!legs2.has(b.gi)) legs2.set(b.gi, []);
+          legs2.get(b.gi).push({ dep: b.dep, arr, badge: DATA.b[tr[1]] });
+        }
+        seen = [];
+      }
+      if (!(noPu && noPu.has(p))) seen.push({ gi: DATA.s[si][0], dep });
+    }
+  }
+  const cands = [];
+  for (const tr of DATA.t) {
+    if (tr[0] !== dia) continue;
+    if (todayOnly && !runsOn(tr[5], today)) continue;
+    const flat = tr[3], { noPu, noDo } = restrSets(tr[6]);
+    let bDep = -1;
+    for (let k = 0; k < flat.length; k += 3) {
+      const p = k / 3, si = flat[k], dep = flat[k + 1], dd = flat[k + 2];
+      if (fa.has(si)) {
+        if (!(noPu && noPu.has(p))) bDep = dep;
+        continue;
+      }
+      if (bDep < 0 || (noDo && noDo.has(p))) continue;
+      const hubGi = DATA.s[si][0];
+      if (hubGi === fromGi || hubGi === toGi) continue;
+      const l2 = legs2.get(hubGi);
+      if (!l2) continue;
+      const hubArr = dep - dd;
+      for (const g2 of l2) {
+        if (g2.dep >= hubArr + 3 && g2.dep <= hubArr + 45) {
+          cands.push({ dep: bDep, arr: g2.arr, hub: DATA.g[hubGi][0],
+                       wait: g2.dep - hubArr, b1: DATA.b[tr[1]], b2: g2.badge });
+        }
+      }
+    }
+    if (cands.length > 500) break;
+  }
+  // 同一出発×同一到着は待ち時間最短の行程だけ残す
+  const best = new Map();
+  for (const c of cands) {
+    const key = c.dep + ":" + c.arr;
+    if (!best.has(key) || best.get(key).wait > c.wait) best.set(key, c);
+  }
+  return [...best.values()];
 }
 
 // ===== バス停サジェスト =====
@@ -803,7 +894,7 @@ function renderNext() {
     return;
   }
   const now = nowMin();
-  const trips = findTrips(fgi, tgi, diaOfToday())
+  const trips = findTrips(fgi, tgi, diaOfToday(), true)
     .filter(t => t.dep >= now).sort((a, b) => a.dep - b.dep);
   card.className = "";
   if (!trips.length) {
@@ -845,7 +936,7 @@ function renderResults() {
     box.innerHTML = '<div class="empty-msg">乗車・降車バス停を選ぶと便を表示します</div>';
     return;
   }
-  let trips = findTrips(fgi, tgi, state.dia);
+  let trips = findTrips(fgi, tgi, state.dia, state.mode === "now");
   const [th, tm] = (state.time || "00:00").split(":").map(Number);
   const tMin = th * 60 + tm;
   const now = nowMin();
@@ -862,7 +953,30 @@ function renderResults() {
   }
   cap.textContent = capText + "（" + DIA_NAMES[state.dia] + "ダイヤ・" + trips.length + "便）";
   if (!trips.length) {
-    box.innerHTML = '<div class="empty-msg">条件に合う便がありません</div>';
+    // 直通が無ければ、乗換1回の参考ルートを探して提示する
+    let tf = findTransfers(fgi, tgi, state.dia, state.mode === "now");
+    if (state.mode === "now") tf = tf.filter(x => x.dep >= now).sort((a, b) => a.arr - b.arr);
+    else if (state.mode === "dep") tf = tf.filter(x => x.dep >= tMin).sort((a, b) => a.arr - b.arr);
+    else tf = tf.filter(x => x.arr <= tMin).sort((a, b) => b.arr - a.arr);
+    tf = tf.slice(0, 3);
+    if (!tf.length) {
+      box.innerHTML = '<div class="empty-msg">条件に合う便がありません</div>';
+      return;
+    }
+    box.innerHTML = '<div class="empty-msg">直通はありません。乗換1回の参考ルート:</div>';
+    tf.forEach(c => {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML =
+        '<span class="badge" style="visibility:hidden">－</span>' +
+        '<div class="body">' +
+          '<div class="t num">' + fmtMin(c.dep) + '<span class="arrow">→</span>' + fmtMin(c.arr) +
+            '<span class="dur">乗換1回</span></div>' +
+          '<div class="sub">' + esc(c.hub) + "で乗換（待ち" + c.wait + "分）" +
+            (c.b1 || c.b2 ? "・" + esc(c.b1 || "？") + "→" + esc(c.b2 || "？") : "") + "</div>" +
+        "</div>";
+      box.appendChild(row);
+    });
     return;
   }
   box.innerHTML = "";
@@ -875,7 +989,8 @@ function renderResults() {
       '<div class="body">' +
         '<div class="t num">' + fmtMin(t.dep) + '<span class="arrow">→</span>' + fmtMin(t.arr) +
           '<span class="dur">' + (t.arr - t.dep) + "分</span></div>" +
-        '<div class="sub">' + esc(t.head) + "行" + (plat ? "・" + esc(plat) + "番のりば" : "") + opChip(t) + "</div>" +
+        '<div class="sub">' + esc(t.head) + "行" + (plat ? "・" + esc(plat) + "番のりば" : "") + opChip(t) +
+          (t.lbl ? '<span class="svchip">' + esc(t.lbl) + "</span>" : "") + "</div>" +
       "</div>";
     const star = document.createElement("button");
     star.className = "star" + (isFav(state.from, state.to) ? " on" : "");

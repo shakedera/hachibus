@@ -48,9 +48,15 @@ CENTER_LOCALITIES = ["三日町", "八日町", "中央通り", "朔日町", "六
 # 同一地点で名前が異なる停留所（完全一致でのみ適用）
 STOP_ALIAS = {
     "八戸駅前": "八戸駅",              # 南部バス→市営名
-    "ラピアバスターミナル": "ラピアバスセンター",
+    "ラピアバスターミナル": "ラピア",  # 南部ターミナルはラピア敷地内（市営バスセンターは300m先の路上停）
     "八戸市民病院": "市民病院",        # 十鉄→市営名
+    "一中前（第一中学）": "一中前",
+    "盲聾学校通": "盲ろう学校通",
+    "南郷事務所前": "南郷事務所",
+    "道の駅": "道の駅なんごう",
 }
+# 南部バスが八戸市内停に付ける重複回避サフィックス（座標同一の別名分裂の主因）
+REGION_SUFFIX_RE = re.compile(r"（八戸市?）$")
 import unicodedata
 
 
@@ -64,7 +70,12 @@ def normalize_stop_name(name):
                 return f"八戸中心街ターミナル（{loc}）", (m.group(1) if m else "")
     if name in STOP_ALIAS:
         return STOP_ALIAS[name], ""
-    return name, ""
+    base = REGION_SUFFIX_RE.sub("", name)   # 「市庁前（八戸）」→「市庁前」
+    if base.endswith("バス停"):             # 南郷「市ノ沢バス停」→「市ノ沢」
+        base = base[: -len("バス停")]
+    if base.endswith("通り"):               # 「卸センター通り」→「卸センター通」（市営表記に統一）
+        base = base[:-1]
+    return base, ""
 
 
 def read_csv(zf, name):
@@ -146,13 +157,28 @@ def load_feed(zip_path):
             feed["warnings"].append(warn)
     feed["is_base_feed"] = is_base_feed
 
-    # calendar_dates: 例外日（市営の基本3サービスのみ利用）
+    # 運行日情報（サービスごとの曜日マスク・期間・例外日）。「今日走るか」判定に使う
+    services = {}
+    for sid, row in calendar.items():
+        mask = 0
+        for i, d in enumerate(("monday", "tuesday", "wednesday", "thursday",
+                               "friday", "saturday", "sunday")):
+            if row[d] == "1":
+                mask |= (1 << i)
+        services[sid] = {"m": mask, "s": row["start_date"], "e": row["end_date"], "a": [], "d": []}
+
+    # calendar_dates: サービス別の追加/運休日を services に、
+    # 市営の基本3サービスの追加日は「日付→ダイヤ区分」辞書(hd)にも入れる
     holiday_map = {}
-    if is_base_feed and has_file(zf, "calendar_dates.txt"):
+    if has_file(zf, "calendar_dates.txt"):
         for r in read_csv(zf, "calendar_dates.txt"):
             sid, date, ex = r["service_id"], r["date"], r["exception_type"]
-            if sid in BASE_SERVICE_PREFIX and ex == "1":
+            if sid not in services:
+                services[sid] = {"m": 0, "s": "", "e": "", "a": [], "d": []}
+            (services[sid]["a"] if ex == "1" else services[sid]["d"]).append(date)
+            if is_base_feed and sid in BASE_SERVICE_PREFIX and ex == "1":
                 holiday_map[date] = BASE_SERVICE_PREFIX[sid]
+    feed["services"] = services
     feed["holiday_map"] = holiday_map
 
     # stops
@@ -197,6 +223,7 @@ def load_feed(zip_path):
             svc_classes[sid],
             t.get("trip_headsign", ""),
             route_short.get(t.get("route_id", ""), ""),
+            sid,
         )
     feed["trips_meta"] = trips_meta
 
@@ -211,7 +238,11 @@ def load_feed(zip_path):
             continue
         dep = time_to_min(r["departure_time"])
         arr = time_to_min(r["arrival_time"])
-        trip_stops[tid].append((int(r["stop_sequence"]), sid, dep, dep - arr))
+        trip_stops[tid].append((
+            int(r["stop_sequence"]), sid, dep, dep - arr,
+            (r.get("pickup_type") or "0") == "1",     # 乗車不可
+            (r.get("drop_off_type") or "0") == "1",   # 降車不可
+        ))
         if tid not in trip_badge:
             m = BADGE_RE.match(r.get("stop_headsign", "") or "")
             badge = m.group(1) if m else ""
@@ -242,26 +273,56 @@ def build(zip_paths, out_path, label):
             ops.append(fd["op"])
         fd["op_i"] = op_idx[fd["op"]]
 
-    # バス停: 名前でグループ化（事業者をまたいで同名は統合）
-    group_index, groups = {}, []
-    stops_out = []
-    stop_int = {}  # (feed_i, stop_id) → 連番int
+    # バス停の名寄せは2段階:
+    # (1) 正規化名で集める（事業者をまたいで同名は統合候補に）
+    # (2) 座標500m閾値でクラスタリングし、同名の別地点（例: 別の町の「中村」）は分離する
+    from math import asin, cos, radians, sin, sqrt
+
+    def dist_m(a, b):
+        la1, lo1, la2, lo2 = map(radians, (a[0], a[1], b[0], b[1]))
+        h = sin((la2 - la1) / 2) ** 2 + cos(la1) * cos(la2) * sin((lo2 - lo1) / 2) ** 2
+        return 12742000 * asin(sqrt(h))
+
+    by_name = {}
     for fi, fd in enumerate(feeds):
         for sid, s in fd["stops"].items():
             name, plat_extra = normalize_stop_name(s["name"])
-            if name not in group_index:
-                group_index[name] = len(groups)
-                groups.append([name, fd["kana"].get(sid, "")])
-            gi = group_index[name]
-            if not groups[gi][1] and fd["kana"].get(sid):
-                groups[gi][1] = fd["kana"][sid]
             try:
                 lat = round(float(s["lat"]), 5)
                 lon = round(float(s["lon"]), 5)
             except ValueError:
                 lat = lon = 0
-            stop_int[(fi, sid)] = len(stops_out)
-            stops_out.append([gi, s["platform"] or plat_extra, lat, lon])
+            by_name.setdefault(name, []).append(
+                (fi, sid, s["platform"] or plat_extra, lat, lon, fd["kana"].get(sid, "")))
+
+    group_index, groups, stops_out, stop_int = {}, [], [], {}
+    split_names = []
+    for name, items in by_name.items():
+        clusters = []
+        for it in items:
+            placed = False
+            for cl in clusters:
+                if it[3] and cl["pt"][0] and dist_m((it[3], it[4]), cl["pt"]) <= 500:
+                    cl["items"].append(it)
+                    placed = True
+                    break
+            if not placed:
+                if not it[3] and clusters:   # 座標なしは先頭クラスタに寄せる
+                    clusters[0]["items"].append(it)
+                else:
+                    clusters.append({"pt": (it[3], it[4]), "items": [it]})
+        clusters.sort(key=lambda c: -len(c["items"]))
+        if len(clusters) > 1:
+            split_names.append(f"{name}×{len(clusters)}")
+        for ci, cl in enumerate(clusters):
+            gname = name if ci == 0 else name + "②③④⑤⑥⑦⑧⑨"[ci - 1]
+            kana = next((it[5] for it in cl["items"] if it[5]), "")
+            group_index[gname] = len(groups)
+            gi = len(groups)
+            groups.append([gname, kana])
+            for fi, sid, plat, lat, lon, _k in cl["items"]:
+                stop_int[(fi, sid)] = len(stops_out)
+                stops_out.append([gi, plat, lat, lon])
 
     # 便（区分が複数あるサービスは各区分に展開する）
     badge_table, badge_idx = [], {}
@@ -273,19 +334,57 @@ def build(zip_paths, out_path, label):
             table.append(s)
         return index[s]
 
+    # 運行日テーブル: [曜日mask(月=bit0), start, end, 追加日[], 運休日[], 表示ラベル]
+    DAY_CHARS = "月火水木金土日"
+    sv_table, sv_idx = [], {}
+
+    def svc_entry(fi, sid):
+        key = (fi, sid)
+        if key in sv_idx:
+            return sv_idx[key]
+        sv = feeds[fi]["services"].get(sid)
+        if sv is None:
+            entry = [127, 0, 0, [], [], ""]   # 不明なサービスは毎日運行扱い
+        else:
+            wk = sv["m"] & 0b11111
+            if 0 < wk < 0b11111:   # 平日の一部曜日のみ → 「月水金」等
+                label = "".join(DAY_CHARS[i] for i in range(7) if sv["m"] >> i & 1)
+            elif "夏" in sid:
+                label = "夏期"
+            elif "冬" in sid:
+                label = "冬期"
+            elif len(sv["d"]) >= 30 or (sv["m"] == 0 and sv["a"]):
+                label = "特定日"   # こどもの国・うみねこ号など運行日限定
+            else:
+                label = ""
+            entry = [sv["m"], int(sv["s"] or 0), int(sv["e"] or 0),
+                     sorted(int(x) for x in sv["a"]), sorted(int(x) for x in sv["d"]), label]
+        sv_idx[key] = len(sv_table)
+        sv_table.append(entry)
+        return sv_idx[key]
+
     trips_out = []
     for fi, fd in enumerate(feeds):
         for tid, rows in fd["trip_stops"].items():
             rows.sort()
-            classes, headsign, route_short = fd["trips_meta"][tid]
+            classes, headsign, route_short, sid_svc = fd["trips_meta"][tid]
             badge = fd["trip_badge"].get(tid, "") or route_short
-            flat = []
-            for _seq, sid, dep, d in rows:
+            flat, restr = [], []
+            for p, (_seq, sid, dep, d, pu, do_) in enumerate(rows):
                 flat.extend((stop_int[(fi, sid)], dep, d))
+                # 乗降制限（起点の降車不可・終点の乗車不可は検索上無意味なので省く）
+                if pu and p < len(rows) - 1:
+                    restr.append(p * 2)
+                if do_ and p > 0:
+                    restr.append(p * 2 + 1)
             bi = intern(badge_table, badge_idx, badge)
             hi = intern(head_table, head_idx, headsign)
+            svi = svc_entry(fi, sid_svc)
             for cls in sorted(classes):
-                trips_out.append([cls, bi, hi, flat, fd["op_i"]])
+                row_out = [cls, bi, hi, flat, fd["op_i"], svi]
+                if restr:
+                    row_out = row_out + [restr]
+                trips_out.append(row_out)
     trips_out.sort(key=lambda t: (t[0], t[3][1] if len(t[3]) > 1 else 0))
 
     # 例外日辞書・有効期限（期限は全フィードの最小＝どれかが切れたら警告）
@@ -312,7 +411,10 @@ def build(zip_paths, out_path, label):
         "s": stops_out,        # 停留所 [グループidx, のりば, 緯度, 経度]
         "b": badge_table,      # 系統番号テーブル
         "h": head_table,       # 行き先テーブル
-        "t": trips_out,        # 便 [区分, 系統idx, 行き先idx, [停idx,出発分,差分,...], 事業者idx]
+        "sv": sv_table,        # 運行日 [曜日mask, start, end, 追加日[], 運休日[], ラベル]
+        # 便 [区分, 系統idx, 行き先idx, [停idx,出発分,差分,...], 事業者idx, 運行日idx, (乗降制限)]
+        # 乗降制限: 停位置p の乗車不可=p*2, 降車不可=p*2+1 の疎リスト（無い便は6要素）
+        "t": trips_out,
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
@@ -325,6 +427,9 @@ def build(zip_paths, out_path, label):
     print(f"  サイズ: {size / 1024:.0f} KB / バス停 {len(stops_out)}（グループ {len(groups)}） / "
           f"便 {len(trips_out)}（平日 {cls_count[0]} / 土曜 {cls_count[1]} / 日祝 {cls_count[2]}）")
     print(f"  例外日 {len(holiday_map)} 日 / 有効期限 {expires}")
+    if split_names:
+        head = ", ".join(split_names[:8])
+        print(f"  同名別地点を分離: {len(split_names)} 件（{head}{' …' if len(split_names) > 8 else ''}）")
     for fd in feeds:
         for w in fd["warnings"]:
             print(f"  警告[{fd['op']}]: {w}")
