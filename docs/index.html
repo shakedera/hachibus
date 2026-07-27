@@ -186,10 +186,10 @@ footer .linkbtn{
   border:none;background:none;color:var(--blue);font-size:11.5px;
   text-decoration:underline;cursor:pointer;padding:2px 4px;
 }
-/* 事業者バッジ（複数事業者データのときのみ表示） */
+/* 事業者バッジ（複数事業者データのときのみ表示。色は車体色に合わせてJS側で指定） */
 .opchip{
-  display:inline-block;font-size:10px;color:var(--sub);
-  border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:6px;
+  display:inline-block;font-size:10px;font-weight:700;color:#fff;
+  border-radius:4px;padding:1px 5px;margin-left:6px;
   vertical-align:1px;
 }
 
@@ -610,10 +610,13 @@ async function idbDel(key) {
   });
 }
 
-// 複数事業者データのときだけ事業者バッジを付ける
+// 複数事業者データのときだけ事業者バッジを付ける（色は各社の車体色イメージ）
+const OP_COLORS = { "市営": "#1656A0", "南部": "#C0392B", "十鉄": "#2E7D32", "南郷": "#E07A00" };
 function opChip(t) {
-  return DATA.op && DATA.op.length > 1
-    ? '<span class="opchip">' + esc(DATA.op[t.op || 0]) + "</span>" : "";
+  if (!DATA.op || DATA.op.length <= 1) return "";
+  const name = DATA.op[t.op || 0];
+  const c = OP_COLORS[name] || "#66727F";
+  return '<span class="opchip" style="background:' + c + '">' + esc(name) + "</span>";
 }
 
 // ===== 検索ロジック =====

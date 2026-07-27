@@ -1,6 +1,6 @@
 // はちバス時刻表 service worker（キャッシュファースト）
 // data.json を更新したら必ずこのバージョン番号を上げること
-const CACHE_NAME = "hachibus-v5";
+const CACHE_NAME = "hachibus-v6";
 
 const PRECACHE = [
   "./",
