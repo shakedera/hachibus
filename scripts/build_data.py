@@ -228,6 +228,12 @@ def load_feed(zip_path):
 def build(zip_paths, out_path, label):
     feeds = [load_feed(p) for p in zip_paths]
 
+    # 同一事業者のzipが複数あると全便が二重登録されるため停止（旧zipの消し忘れ対策）
+    agencies = [fd["agency"] for fd in feeds]
+    dups = sorted({a for a in agencies if agencies.count(a) > 1})
+    if dups:
+        sys.exit(f"エラー: 同じ事業者のzipが複数あります: {dups}（旧zipを削除してから再実行してください）")
+
     # 事業者テーブル（同名は統合）
     ops, op_idx = [], {}
     for fd in feeds:
@@ -329,6 +335,12 @@ def main():
     if not public_zips:
         sys.exit(f"エラー: {GTFS_DIR} に GTFS zip がありません")
     build(public_zips, PUBLIC_OUT, "公開用（市営バスのみ）")
+    # 公開用に市営以外が混入していたら即停止（gtfs/ への誤配置による漏洩防止）
+    with open(PUBLIC_OUT, encoding="utf-8") as f:
+        pub_ops = json.load(f)["op"]
+    if pub_ops != ["市営"]:
+        PUBLIC_OUT.unlink()
+        sys.exit(f"エラー: 公開用データに市営以外の事業者が混入: {pub_ops}（gtfs/ の中身を確認してください）")
 
     private_zips = sorted(PRIVATE_DIR.glob("*.zip")) if PRIVATE_DIR.exists() else []
     if private_zips:

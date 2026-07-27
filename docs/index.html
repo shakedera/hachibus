@@ -22,11 +22,12 @@ body{
 }
 .num{font-variant-numeric:tabular-nums}
 #app{max-width:420px;margin:0 auto;min-height:100vh;background:var(--bg);
-  padding-bottom:24px}
+  padding-bottom:calc(24px + env(safe-area-inset-bottom, 0px))}
 
 /* ヘッダー */
 header{
-  background:var(--blue); color:#fff; padding:14px 16px 12px;
+  background:var(--blue); color:#fff;
+  padding:calc(14px + env(safe-area-inset-top, 0px)) 16px 12px;
   display:flex; justify-content:space-between; align-items:baseline;
   position:sticky; top:0; z-index:20;
 }
@@ -102,7 +103,7 @@ section.card h2{font-size:13px;color:var(--sub);font-weight:700;margin-bottom:10
 .field{position:relative;display:flex;align-items:center;gap:8px}
 .field input{
   flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;
-  padding:10px 12px 10px 34px;font-size:15px;background:#FAFBFC;color:var(--ink);
+  padding:10px 12px 10px 34px;font-size:16px;background:#FAFBFC;color:var(--ink);
 }
 .locbtn{
   flex:none;display:flex;align-items:center;gap:5px;
@@ -205,7 +206,7 @@ footer .linkbtn{
   width:100%;max-width:420px;
   max-height:92vh;overflow-y:auto;
   background:#fff;border-radius:0 0 20px 20px;
-  padding:16px 16px 16px;
+  padding:calc(16px + env(safe-area-inset-top, 0px)) 16px 16px;
   transform:translate(-50%,-105%);transition:transform .28s cubic-bezier(.32,.72,.2,1);
   box-shadow:0 6px 30px rgba(14,58,110,.2);
 }
@@ -236,7 +237,7 @@ footer .linkbtn{
 .psrow svg{flex:none;width:15px;height:15px;fill:#8A97A5}
 .psrow input{
   flex:1;border:none;outline:none;background:transparent;
-  font-size:14px;color:var(--ink);min-width:0;padding:0;
+  font-size:16px;color:var(--ink);min-width:0;padding:0;
 }
 .psrow input::placeholder{color:#A6B2BF}
 .psrow .clear{
@@ -385,7 +386,8 @@ footer .linkbtn{
 .selectbar button:active{background:var(--navy)}
 /* トースト */
 .toast{
-  position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);
+  position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom, 0px));
+  transform:translateX(-50%) translateY(16px);
   background:#26313D;color:#fff;font-size:12.5px;font-weight:600;
   padding:10px 18px;border-radius:999px;white-space:nowrap;
   opacity:0;pointer-events:none;transition:all .25s;z-index:60;
@@ -481,7 +483,7 @@ footer .linkbtn{
     <div class="placesearch">
       <div class="psrow">
         <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
-        <input id="psInput" type="text" placeholder="施設名で検索（例：はっち・市庁）" autocomplete="off">
+        <input id="psInput" type="text" placeholder="施設名を入力してEnterで検索" autocomplete="off" enterkeyhint="search">
         <button class="clear" id="psClear" type="button">✕</button>
       </div>
       <div class="pssuggest" id="psSuggest"></div>
@@ -537,7 +539,7 @@ let groupByName = new Map();   // グループ名 → グループidx
 let stopsOfGroup = [];         // グループidx → [停留所int id]
 let searchIndex = [];          // [{gi, norm, kana}]
 let favs = [];
-let state = { sel: 0, from: "", to: "", mode: "now", dia: 0, time: "" };
+let state = { sel: 0, from: "", to: "", mode: "now", dia: 0, time: "", diaDate: "" };
 let timer = null;
 let usingImported = false;     // 端末取り込みデータ（IndexedDB）を使用中か
 let importedAt = 0;
@@ -566,6 +568,15 @@ function diaOfToday() {
   if (ex !== undefined) return ex;
   const w = d.getDay();
   return w === 0 ? 2 : w === 6 ? 1 : 0;
+}
+// 手動で選んだダイヤ区分の有効期限は当日限り。日付が変わったら今日の区分へ戻す
+function refreshDia() {
+  const today = ymd(new Date());
+  if (state.diaDate !== today) {
+    state.dia = diaOfToday();
+    state.diaDate = today;
+    saveState();
+  }
 }
 function stopLabel(si) {
   const [gi, plat] = DATA.s[si];
@@ -627,15 +638,16 @@ function findTrips(fromGi, toGi, dia) {
   for (const tr of DATA.t) {
     const [cls, bi, hi, flat] = tr;
     if (cls !== dia) continue;
-    let bK = -1, bDep = 0, bSi = -1;
+    // 循環線対応: 乗車グループの全出現を候補にし、降車到着ごとに直近（=最短）の乗車を採用
+    let pend = null;
     for (let k = 0; k < flat.length; k += 3) {
       const si = flat[k], dep = flat[k + 1], dd = flat[k + 2];
-      if (bK < 0) {
-        if (fa.has(si)) { bK = k; bDep = dep; bSi = si; }
-      } else if (ta.has(si)) {
-        out.push({ dep: bDep, arr: dep - dd, badge: DATA.b[bi], head: DATA.h[hi],
-                   fs: bSi, ts: si, op: tr[4] || 0 });
-        break;
+      if (fa.has(si)) {
+        pend = { dep, si };
+      } else if (pend && ta.has(si)) {
+        out.push({ dep: pend.dep, arr: dep - dd, badge: DATA.b[bi], head: DATA.h[hi],
+                   fs: pend.si, ts: si, op: tr[4] || 0 });
+        pend = null;
       }
     }
   }
@@ -650,6 +662,32 @@ function buildIndex() {
   });
   stopsOfGroup = DATA.g.map(() => []);
   DATA.s.forEach((s, si) => stopsOfGroup[s[0]].push(si));
+  // 「（…）」違いののりば群を横断検索する仮想グループ（例: 八戸中心街ターミナル（全のりば））
+  const bases = new Map();
+  DATA.g.forEach((g, gi) => {
+    const m = g[0].match(/^(.+?)（[^）]+）$/);
+    if (m) {
+      if (!bases.has(m[1])) bases.set(m[1], []);
+      bases.get(m[1]).push(gi);
+    }
+  });
+  bases.forEach((gis, base) => {
+    if (gis.length < 2) return;
+    // 座標が離れた同名別地点（例: 別の町の「役場前（…）」）は統合しない
+    const pts = gis.flatMap(gi => stopsOfGroup[gi]).map(si => DATA.s[si]).filter(p => p[2]);
+    if (!pts.length) return;
+    const lats = pts.map(p => p[2]), lons = pts.map(p => p[3]);
+    if (Math.max(...lats) - Math.min(...lats) > 0.006 ||
+        Math.max(...lons) - Math.min(...lons) > 0.008) return;
+    const name = base + "（全のりば）";
+    if (groupByName.has(name)) return;
+    const kana = DATA.g[gis[0]][1];
+    const vgi = DATA.g.length;
+    DATA.g.push([name, kana]);
+    groupByName.set(name, vgi);
+    stopsOfGroup.push(gis.flatMap(gi => stopsOfGroup[gi]));
+    searchIndex.push({ gi: vgi, norm: norm(name), kana });
+  });
 }
 function attachSuggest(inputId, boxId, key) {
   const input = $(inputId), box = $(boxId);
@@ -666,7 +704,13 @@ function attachSuggest(inputId, boxId, key) {
     state[key] = ""; // 名前が確定するまで未選択扱い
     const q = norm(input.value);
     if (!q) { box.style.display = "none"; render(); return; }
-    const hits = searchIndex.filter(e => e.norm.includes(q) || e.kana.includes(q)).slice(0, 8);
+    const hits = searchIndex
+      .filter(e => e.norm.includes(q) || e.kana.includes(q))
+      .sort((a, b) =>
+        ((a.norm.startsWith(q) || a.kana.startsWith(q)) ? 0 : 1) -
+        ((b.norm.startsWith(q) || b.kana.startsWith(q)) ? 0 : 1) ||
+        (a.norm.length - b.norm.length) || (a.gi - b.gi))
+      .slice(0, 12);
     box.innerHTML = "";
     hits.forEach(e => {
       const div = document.createElement("div");
@@ -822,7 +866,7 @@ function renderResults() {
     return;
   }
   box.innerHTML = "";
-  trips.slice(0, 40).forEach((t, i) => {
+  trips.forEach((t, i) => {
     const row = document.createElement("div");
     row.className = "row" + (state.mode === "now" && i === 0 ? " soon" : "");
     const plat = DATA.s[t.fs][1];
@@ -841,12 +885,6 @@ function renderResults() {
     row.appendChild(star);
     box.appendChild(row);
   });
-  if (trips.length > 40) {
-    const more = document.createElement("div");
-    more.className = "empty-msg";
-    more.textContent = "ほか " + (trips.length - 40) + " 便";
-    box.appendChild(more);
-  }
 }
 
 function esc(s) {
@@ -1079,7 +1117,7 @@ function openLocSheet(field) {
   $("#locLoading").classList.remove("show");
   $("#locTitle").textContent = field === "from" ? "現在地から近いバス停" : "目的地の近くのバス停";
   $("#selConfirm").textContent = fieldLabel() + "に設定";
-  $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
+  $("#sheetNote").textContent = "施設名を入力して検索（Enter）すると、近くのバス停を探します";
   $("#locOverlay").classList.add("show");
   $("#locSheet").classList.add("show");
   if (field === "from") startGeolocate();
@@ -1130,7 +1168,7 @@ function bindLocSheet() {
       $("#selectbar").classList.remove("show");
       $("#stoplist").classList.remove("show");
       $("#mapview").classList.remove("show");
-      $("#sheetNote").textContent = "施設名を入力すると、近くのバス停を探します";
+      $("#sheetNote").textContent = "施設名を入力して検索（Enter）すると、近くのバス停を探します";
     }
     $("#psInput").focus();
   });
@@ -1143,17 +1181,16 @@ function bindLocSheet() {
         showSug('<div class="noresult">検索に失敗しました。通信環境を確認してください</div>');
     }
   };
+  // Nominatimの利用規約は入力ごとの自動検索(オートコンプリート)を禁止しているため、Enter確定時のみ検索する
   $("#psInput").addEventListener("input", () => {
     const q = $("#psInput").value.trim();
     $("#psClear").classList.toggle("show", q.length > 0);
-    clearTimeout(psTimer);
-    if (q.length < 2) { hideSug(); return; }
-    psTimer = setTimeout(() => runSearch(q), PS_DEBOUNCE);
+    hideSug();
   });
   $("#psInput").addEventListener("keydown", e => {
     if (e.key === "Enter") {
       const q = $("#psInput").value.trim();
-      if (q.length >= 2) { clearTimeout(psTimer); runSearch(q); }
+      if (q.length >= 2) runSearch(q);
     }
   });
 }
@@ -1198,6 +1235,7 @@ function bindTabs() {
   $("#diaTabs").addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
     state.dia = +b.dataset.dia;
+    state.diaDate = ymd(new Date());
     document.querySelectorAll("#diaTabs button").forEach(x => x.classList.toggle("active", x === b));
     saveState(); renderResults();
   });
@@ -1255,7 +1293,9 @@ function renderDataSrc() {
 async function main() {
   // 端末に取り込んだ統合データがあれば最優先で使う
   try {
-    const imp = await idbGet("data");
+    // iOS SafariでindexedDB.openが応答しない既知の不具合対策（3秒で公開データへフォールバック）
+    const imp = await Promise.race([idbGet("data"),
+      new Promise(ok => setTimeout(() => ok(null), 3000))]);
     if (imp && imp.data && Array.isArray(imp.data.t) && Array.isArray(imp.data.g)) {
       DATA = imp.data;
       usingImported = true;
@@ -1294,8 +1334,7 @@ async function main() {
   } catch (e) { /* 初期値のまま */ }
   if (!["now", "dep", "arr"].includes(state.mode)) state.mode = "now";
   if (![0, 1, 2].includes(state.dia)) state.dia = diaOfToday();
-  // 初回起動時（保存が無いとき）は今日のダイヤを初期値に
-  if (localStorage.getItem(LS_STATE) === null) state.dia = diaOfToday();
+  refreshDia();
   state.sel = autoSelectFav();
   if (state.sel < 0) state.sel = 0;
 
@@ -1309,7 +1348,7 @@ async function main() {
   // 1分ごとに「あと◯分」を自動更新
   timer = setInterval(() => { renderNext(); if (state.mode === "now") renderResults(); }, 60000);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) render();
+    if (!document.hidden) { refreshDia(); applyStateToUI(); render(); }
   });
 
   if ("serviceWorker" in navigator) {
