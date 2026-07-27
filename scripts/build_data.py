@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
-"""GTFS-JP → docs/data.json 前処理スクリプト（Python標準ライブラリのみ）
+"""GTFS-JP → data.json 前処理スクリプト（Python標準ライブラリのみ・複数事業者対応）
 
-gtfs/ にある GTFS-JP zip を読み、アプリが使う軽量JSONを生成する。
+- gtfs/ にある zip（公開可能データ）から docs/data.json を生成する
+- gtfs-private/ に zip があれば、gtfs/ と合わせた統合データを
+  private-data.json（リポジトリ直下・git管理外）にも生成する。
+  これは端末取り込み用で、GitHub には push しないこと（.gitignore 済み）
+
 使い方: python scripts/build_data.py
 """
 import csv
@@ -15,160 +19,219 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 GTFS_DIR = ROOT / "gtfs"
-OUT_PATH = ROOT / "docs" / "data.json"
+PRIVATE_DIR = ROOT / "gtfs-private"
+PUBLIC_OUT = ROOT / "docs" / "data.json"
+PRIVATE_OUT = ROOT / "private-data.json"
 
 # ダイヤ区分: 0=平日, 1=土曜, 2=日祝
 CLASS_NAMES = ["平日", "土曜", "日祝"]
 BASE_SERVICE_PREFIX = {"1_平日": 0, "4_土曜": 1, "2_日祝": 2}
 
+# 事業者名の短縮表示（バッジ用）
+AGENCY_SHORT = {
+    "八戸市交通部": "市営",
+    "岩手県北自動車": "南部",
+    "岩手県北自動車株式会社": "南部",
+    "南部バス": "南部",
+    "十和田観光電鉄": "十鉄",
+    "十和田観光電鉄株式会社": "十鉄",
+    "八戸市": "南郷",  # 南郷コミュニティバス（運行主体は八戸市）
+}
 
-def find_zip():
-    zips = sorted(GTFS_DIR.glob("*.zip"))
-    if not zips:
-        sys.exit(f"エラー: {GTFS_DIR} に GTFS zip がありません")
-    if len(zips) > 1:
-        print(f"警告: zip が複数あります。最初の {zips[0].name} を使います")
-    return zips[0]
+BADGE_RE = re.compile(r"^[\[［]([^\]］]+)[\]］]")
 
 
 def read_csv(zf, name):
-    """zip 内の CSV を DictReader で読む（BOM対応）"""
     with zf.open(name) as f:
         yield from csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
 
 
+def has_file(zf, name):
+    return name in {i.filename for i in zf.infolist()}
+
+
 def time_to_min(hms):
-    """"HH:MM:SS" → 深夜0時からの分数（24時超え表記もそのまま扱える）"""
     h, m, _s = hms.split(":")
     return int(h) * 60 + int(m)
 
 
-def classify_service(service_id, cal_row):
-    """service_id を 平日/土曜/日祝 の3区分に分類。(区分, 基本サービスか) を返す"""
+def service_classes(service_id, cal_row):
+    """service_id → 該当するダイヤ区分の集合。
+
+    市営バスの「1_平日」等はプレフィックスで1区分に確定。
+    それ以外は calendar.txt の曜日パターンから該当区分すべてを返す
+    （例: 十鉄「全日」→ {平日,土曜,日祝}、「日・祝運休」→ {平日,土曜}）。
+    戻り値: (区分set, 基本サービスか, 警告文 or None)
+    """
     for prefix, cls in BASE_SERVICE_PREFIX.items():
         if service_id == prefix:
-            return cls, True
+            return {cls}, True, None
         if service_id.startswith(prefix):
-            return cls, False
-    # プレフィックスで判定できない場合は calendar.txt の曜日パターンで最も近い区分に寄せる
+            return {cls}, False, (
+                f"特殊ダイヤ '{service_id}' を「{CLASS_NAMES[cls]}」区分に寄せました"
+                f"（運行日は calendar_dates 限定の可能性あり）")
     if cal_row:
         days = [int(cal_row[d]) for d in (
             "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")]
-        scores = [sum(days[0:5]), days[5], days[6]]
-        return scores.index(max(scores)), False
-    return 0, False
+        classes = set()
+        if any(days[0:5]):
+            classes.add(0)
+        if days[5]:
+            classes.add(1)
+        if days[6]:
+            classes.add(2)
+        if classes:
+            warn = None
+            if days[0:5].count(1) not in (0, 5):
+                warn = (f"サービス '{service_id}' は平日の一部曜日のみ運行"
+                        f"（{''.join(map(str, days))}）ですが平日区分に含めました")
+            return classes, False, warn
+    return {0}, False, f"サービス '{service_id}' の曜日パターン不明のため平日に分類"
 
 
-def main():
-    zip_path = find_zip()
-    print(f"読み込み: {zip_path.name}")
+def load_feed(zip_path):
+    """1つのGTFS zipを読み、正規化した中間表現を返す"""
     zf = zipfile.ZipFile(zip_path)
+    feed = {"name": zip_path.name, "warnings": []}
 
-    # --- calendar: サービス区分の分類 ---
-    calendar = {r["service_id"]: r for r in read_csv(zf, "calendar.txt")}
-    service_class = {}
-    warnings = []
+    # 事業者名
+    agency = ""
+    if has_file(zf, "agency.txt"):
+        for r in read_csv(zf, "agency.txt"):
+            agency = r.get("agency_name", "")
+            break
+    feed["agency"] = agency
+    feed["op"] = AGENCY_SHORT.get(agency, (agency or zip_path.stem)[:4])
+
+    # calendar
+    calendar = {}
+    if has_file(zf, "calendar.txt"):
+        calendar = {r["service_id"]: r for r in read_csv(zf, "calendar.txt")}
+    feed["expires"] = max((r["end_date"] for r in calendar.values()), default="")
+
+    svc_classes = {}
+    is_base_feed = False
     for sid, row in calendar.items():
-        cls, is_base = classify_service(sid, row)
-        service_class[sid] = cls
-        if not is_base:
-            warnings.append(f"特殊ダイヤ '{sid}' を「{CLASS_NAMES[cls]}」区分に寄せました"
-                            f"（運行日は calendar_dates 限定の可能性あり）")
+        classes, is_base, warn = service_classes(sid, row)
+        svc_classes[sid] = classes
+        if is_base:
+            is_base_feed = True
+        if warn:
+            feed["warnings"].append(warn)
+    feed["is_base_feed"] = is_base_feed
 
-    # ダイヤ有効期限 = end_date の最大値
-    expires = max(r["end_date"] for r in calendar.values())
-
-    # --- calendar_dates: 例外日 → ダイヤ区分の辞書 ---
-    # 基本3サービスの「追加(exception_type=1)」を日付→区分として採用する
-    # （例: 祝日は 1_平日 が削除され 2_日祝 が追加される）
+    # calendar_dates: 例外日（市営の基本3サービスのみ利用）
     holiday_map = {}
-    removed_only = defaultdict(set)
-    for r in read_csv(zf, "calendar_dates.txt"):
-        sid, date, ex = r["service_id"], r["date"], r["exception_type"]
-        if sid not in BASE_SERVICE_PREFIX:
-            continue  # 特殊ダイヤの例外日はアプリの区分判定には使わない
-        if ex == "1":
-            cls = BASE_SERVICE_PREFIX[sid]
-            if date in holiday_map and holiday_map[date] != cls:
-                warnings.append(f"例外日 {date} に複数区分の追加があり矛盾（{holiday_map[date]} vs {cls}）")
-            holiday_map[date] = cls
-        else:
-            removed_only[date].add(sid)
-    for date, sids in sorted(removed_only.items()):
-        if date not in holiday_map:
-            warnings.append(f"例外日 {date}: {sorted(sids)} が運休だが代替の追加なし（この日は該当区分の便が実際は走らない）")
+    if is_base_feed and has_file(zf, "calendar_dates.txt"):
+        for r in read_csv(zf, "calendar_dates.txt"):
+            sid, date, ex = r["service_id"], r["date"], r["exception_type"]
+            if sid in BASE_SERVICE_PREFIX and ex == "1":
+                holiday_map[date] = BASE_SERVICE_PREFIX[sid]
+    feed["holiday_map"] = holiday_map
 
-    # --- stops: 連番ID振り直し ＋ 同名グループ化 ---
-    stops_raw = list(read_csv(zf, "stops.txt"))
+    # stops
+    stops = {}
+    for s in read_csv(zf, "stops.txt"):
+        if s.get("location_type") not in ("", "0"):
+            continue
+        stops[s["stop_id"]] = {
+            "name": s["stop_name"],
+            "platform": s.get("platform_code", "") or "",
+            "lat": s.get("stop_lat", ""), "lon": s.get("stop_lon", ""),
+        }
+    feed["stops"] = stops
 
-    # 読み仮名（translations.txt の ja-Hrkt）
-    kana_by_stop = {}
-    try:
+    # 読み仮名
+    kana = {}
+    if has_file(zf, "translations.txt"):
         for r in read_csv(zf, "translations.txt"):
             if (r.get("table_name") == "stops" and r.get("field_name") == "stop_name"
                     and r.get("language") == "ja-Hrkt"):
                 key = r.get("record_id") or r.get("field_value") or ""
                 if key:
-                    kana_by_stop[key] = r["translation"]
-    except KeyError:
-        pass
+                    kana[key] = r["translation"]
+    feed["kana"] = kana
 
-    group_index = {}   # stop_name → group idx
-    groups = []        # [name, kana]
-    stop_int = {}      # 元stop_id → 連番int
-    stops_out = []     # [group_idx, platform_label]
-    for s in stops_raw:
-        if s.get("location_type") not in ("", "0"):
-            continue  # 乗降できない駅・エリアは除外
-        name = s["stop_name"]
-        if name not in group_index:
-            group_index[name] = len(groups)
-            groups.append([name, kana_by_stop.get(s["stop_id"], "")])
-        gi = group_index[name]
-        if not groups[gi][1] and kana_by_stop.get(s["stop_id"]):
-            groups[gi][1] = kana_by_stop[s["stop_id"]]
-        stop_int[s["stop_id"]] = len(stops_out)
-        # 緯度経度は5桁丸め（約1m精度）。「目的地から」の距離計算に使う
-        try:
-            lat = round(float(s["stop_lat"]), 5)
-            lon = round(float(s["stop_lon"]), 5)
-        except (KeyError, ValueError):
-            lat = lon = 0
-        stops_out.append([gi, s.get("platform_code", "") or "", lat, lon])
+    # routes（バッジのフォールバック用に route_short_name）
+    route_short = {}
+    if has_file(zf, "routes.txt"):
+        for r in read_csv(zf, "routes.txt"):
+            route_short[r["route_id"]] = r.get("route_short_name", "") or ""
 
-    # --- trips: 行き先・系統番号 ---
+    # trips
     trips_meta = {}
     for t in read_csv(zf, "trips.txt"):
         sid = t["service_id"]
-        if sid not in service_class:
-            cls, _ = classify_service(sid, None)
-            service_class[sid] = cls
-            warnings.append(f"calendar.txt に無いサービス '{sid}' を「{CLASS_NAMES[cls]}」に分類")
-        trips_meta[t["trip_id"]] = (service_class[sid], t.get("trip_headsign", ""))
+        if sid not in svc_classes:
+            classes, _b, warn = service_classes(sid, None)
+            svc_classes[sid] = classes
+            if warn:
+                feed["warnings"].append(warn)
+        trips_meta[t["trip_id"]] = (
+            svc_classes[sid],
+            t.get("trip_headsign", ""),
+            route_short.get(t.get("route_id", ""), ""),
+        )
+    feed["trips_meta"] = trips_meta
 
-    # --- stop_times: 便ごとの時刻列 ---
-    badge_re = re.compile(r"^[\[［]([^\]］]+)[\]］]")
-    trip_stops = defaultdict(list)   # trip_id → [(seq, stop_int, dep_min, dep-arr)]
-    trip_badge = {}                  # trip_id → 系統番号（先頭停留所の stop_headsign から抽出）
+    # stop_times
+    trip_stops = defaultdict(list)
+    trip_badge = {}
     skipped = 0
     for r in read_csv(zf, "stop_times.txt"):
-        tid = r["trip_id"]
-        sid = r["stop_id"]
-        if tid not in trips_meta or sid not in stop_int:
+        tid, sid = r["trip_id"], r["stop_id"]
+        if tid not in trips_meta or sid not in stops:
             skipped += 1
             continue
         dep = time_to_min(r["departure_time"])
         arr = time_to_min(r["arrival_time"])
-        trip_stops[tid].append((int(r["stop_sequence"]), stop_int[sid], dep, dep - arr))
+        trip_stops[tid].append((int(r["stop_sequence"]), sid, dep, dep - arr))
         if tid not in trip_badge:
-            m = badge_re.match(r.get("stop_headsign", "") or "")
+            m = BADGE_RE.match(r.get("stop_headsign", "") or "")
             badge = m.group(1) if m else ""
-            # 市内循環線は系統番号ではなく運賃 [190円] が入っているため置き換える
             if re.fullmatch(r"\d+円", badge):
                 badge = "循環" if "循環" in r.get("stop_headsign", "") else ""
             trip_badge[tid] = badge
+    if skipped:
+        feed["warnings"].append(f"stop_times {skipped} 行を不明な trip/stop のためスキップ")
+    feed["trip_stops"] = trip_stops
+    feed["trip_badge"] = trip_badge
+    return feed
 
-    # 文字列テーブル（系統番号・行き先）で重複を除く
+
+def build(zip_paths, out_path, label):
+    feeds = [load_feed(p) for p in zip_paths]
+
+    # 事業者テーブル（同名は統合）
+    ops, op_idx = [], {}
+    for fd in feeds:
+        if fd["op"] not in op_idx:
+            op_idx[fd["op"]] = len(ops)
+            ops.append(fd["op"])
+        fd["op_i"] = op_idx[fd["op"]]
+
+    # バス停: 名前でグループ化（事業者をまたいで同名は統合）
+    group_index, groups = {}, []
+    stops_out = []
+    stop_int = {}  # (feed_i, stop_id) → 連番int
+    for fi, fd in enumerate(feeds):
+        for sid, s in fd["stops"].items():
+            name = s["name"]
+            if name not in group_index:
+                group_index[name] = len(groups)
+                groups.append([name, fd["kana"].get(sid, "")])
+            gi = group_index[name]
+            if not groups[gi][1] and fd["kana"].get(sid):
+                groups[gi][1] = fd["kana"][sid]
+            try:
+                lat = round(float(s["lat"]), 5)
+                lon = round(float(s["lon"]), 5)
+            except ValueError:
+                lat = lon = 0
+            stop_int[(fi, sid)] = len(stops_out)
+            stops_out.append([gi, s["platform"], lat, lon])
+
+    # 便（区分が複数あるサービスは各区分に展開する）
     badge_table, badge_idx = [], {}
     head_table, head_idx = [], {}
 
@@ -179,57 +242,73 @@ def main():
         return index[s]
 
     trips_out = []
-    for tid, rows in trip_stops.items():
-        rows.sort()
-        cls, headsign = trips_meta[tid]
-        flat = []
-        for _seq, si, dep, d in rows:
-            flat.extend((si, dep, d))
-        trips_out.append([
-            cls,
-            intern(badge_table, badge_idx, trip_badge.get(tid, "")),
-            intern(head_table, head_idx, headsign),
-            flat,
-        ])
-    # 始発時刻順に並べておく（アプリ側の表示が安定する）
+    for fi, fd in enumerate(feeds):
+        for tid, rows in fd["trip_stops"].items():
+            rows.sort()
+            classes, headsign, route_short = fd["trips_meta"][tid]
+            badge = fd["trip_badge"].get(tid, "") or route_short
+            flat = []
+            for _seq, sid, dep, d in rows:
+                flat.extend((stop_int[(fi, sid)], dep, d))
+            bi = intern(badge_table, badge_idx, badge)
+            hi = intern(head_table, head_idx, headsign)
+            for cls in sorted(classes):
+                trips_out.append([cls, bi, hi, flat, fd["op_i"]])
     trips_out.sort(key=lambda t: (t[0], t[3][1] if len(t[3]) > 1 else 0))
 
-    feed_version = ""
-    try:
-        for r in read_csv(zf, "feed_info.txt"):
-            feed_version = r.get("feed_version", "")
-            break
-    except KeyError:
-        pass
+    # 例外日辞書・有効期限（期限は全フィードの最小＝どれかが切れたら警告）
+    holiday_map = {}
+    for fd in feeds:
+        holiday_map.update(fd["holiday_map"])
+    expires = min((fd["expires"] for fd in feeds if fd["expires"]), default="")
+
+    version = ""
+    for fd, p in zip(feeds, zip_paths):
+        if fd["is_base_feed"]:
+            zf = zipfile.ZipFile(p)
+            if has_file(zf, "feed_info.txt"):
+                for r in read_csv(zf, "feed_info.txt"):
+                    version = r.get("feed_version", "")
+                    break
 
     data = {
-        "v": feed_version,        # フィードのバージョン表記
-        "ex": expires,            # ダイヤ有効期限 YYYYMMDD
-        "hd": holiday_map,        # 例外日 YYYYMMDD → ダイヤ区分(0/1/2)
-        "g": groups,              # バス停名グループ [名前, かな]
-        "s": stops_out,           # 停留所 [グループidx, のりば番号, 緯度, 経度] （配列位置=連番ID）
-        "b": badge_table,         # 系統番号文字列テーブル
-        "h": head_table,          # 行き先文字列テーブル
-        "t": trips_out,           # 便 [区分, 系統idx, 行き先idx, [停idx,出発分,出発-到着,...]]
+        "v": version,          # 代表（市営）フィードのバージョン表記
+        "ex": expires,         # ダイヤ有効期限 YYYYMMDD（全フィードの最小）
+        "hd": holiday_map,     # 例外日 YYYYMMDD → ダイヤ区分(0/1/2)
+        "op": ops,             # 事業者名テーブル（2件以上のときアプリがバッジ表示）
+        "g": groups,           # バス停名グループ [名前, かな]
+        "s": stops_out,        # 停留所 [グループidx, のりば, 緯度, 経度]
+        "b": badge_table,      # 系統番号テーブル
+        "h": head_table,       # 行き先テーブル
+        "t": trips_out,        # 便 [区分, 系統idx, 行き先idx, [停idx,出発分,差分,...], 事業者idx]
     }
-
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT_PATH, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 
-    # --- ビルドログ ---
-    size = OUT_PATH.stat().st_size
+    size = out_path.stat().st_size
     cls_count = Counter(t[0] for t in trips_out)
-    print(f"出力: {OUT_PATH}")
-    print(f"サイズ: {size / 1024:.0f} KB ({size:,} bytes)")
-    print(f"バス停: {len(stops_out)} 箇所（名前グループ {len(groups)} 件、かな付き {sum(1 for g in groups if g[1])} 件）")
-    print(f"便数: {len(trips_out)} "
-          f"（平日 {cls_count[0]} / 土曜 {cls_count[1]} / 日祝 {cls_count[2]}）")
-    print(f"例外日: {len(holiday_map)} 日 / ダイヤ有効期限: {expires}")
-    if skipped:
-        print(f"警告: stop_times {skipped} 行を不明な trip/stop のためスキップ")
-    for w in warnings:
-        print(f"警告: {w}")
+    print(f"--- {label} → {out_path.name}")
+    agencies = " / ".join(f"{fd['agency']}({fd['op']})" for fd in feeds)
+    print(f"  事業者: {agencies}")
+    print(f"  サイズ: {size / 1024:.0f} KB / バス停 {len(stops_out)}（グループ {len(groups)}） / "
+          f"便 {len(trips_out)}（平日 {cls_count[0]} / 土曜 {cls_count[1]} / 日祝 {cls_count[2]}）")
+    print(f"  例外日 {len(holiday_map)} 日 / 有効期限 {expires}")
+    for fd in feeds:
+        for w in fd["warnings"]:
+            print(f"  警告[{fd['op']}]: {w}")
+
+
+def main():
+    public_zips = sorted(GTFS_DIR.glob("*.zip"))
+    if not public_zips:
+        sys.exit(f"エラー: {GTFS_DIR} に GTFS zip がありません")
+    build(public_zips, PUBLIC_OUT, "公開用（市営バスのみ）")
+
+    private_zips = sorted(PRIVATE_DIR.glob("*.zip")) if PRIVATE_DIR.exists() else []
+    if private_zips:
+        build(public_zips + private_zips, PRIVATE_OUT, "統合版（端末取り込み用・公開禁止）")
+        print(f"※ {PRIVATE_OUT.name} は git 管理外です。スマホのアプリの"
+              f"「データ取り込み」からこのファイルを読み込んでください")
 
 
 if __name__ == "__main__":

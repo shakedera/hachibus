@@ -182,6 +182,16 @@ section.card h2{font-size:13px;color:var(--sub);font-weight:700;margin-bottom:10
 
 /* フッター */
 footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;line-height:1.7}
+footer .linkbtn{
+  border:none;background:none;color:var(--blue);font-size:11.5px;
+  text-decoration:underline;cursor:pointer;padding:2px 4px;
+}
+/* 事業者バッジ（複数事業者データのときのみ表示） */
+.opchip{
+  display:inline-block;font-size:10px;color:var(--sub);
+  border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:6px;
+  vertical-align:1px;
+}
 
 /* ===== 目的地から（ボトムシート） mock-location-v4 準拠 ===== */
 :root{--dest-red:#E0503A}
@@ -448,8 +458,10 @@ footer{margin:22px 16px 0;font-size:11.5px;color:var(--sub);text-align:center;li
   <div id="results"><div class="empty-msg">乗車・降車バス停を選ぶと便を表示します</div></div>
 
   <footer>
-    出典: 八戸市交通部 GTFS-JPオープンデータ（CC BY 4.0）<br>
-    <span id="expireLabel" class="num"></span>
+    <span id="srcLabel">出典: 八戸市交通部 GTFS-JPオープンデータ（CC BY 4.0）</span><br>
+    <span id="expireLabel" class="num"></span><br>
+    <span id="dataSrcRow"></span>
+    <input type="file" id="importFile" accept=".json,application/json" style="display:none">
   </footer>
 
   <!-- 目的地から: ボトムシート -->
@@ -527,6 +539,8 @@ let searchIndex = [];          // [{gi, norm, kana}]
 let favs = [];
 let state = { sel: 0, from: "", to: "", mode: "now", dia: 0, time: "" };
 let timer = null;
+let usingImported = false;     // 端末取り込みデータ（IndexedDB）を使用中か
+let importedAt = 0;
 
 const $ = s => document.querySelector(s);
 
@@ -560,12 +574,55 @@ function stopLabel(si) {
 function saveState() { localStorage.setItem(LS_STATE, JSON.stringify(state)); }
 function saveFavs() { localStorage.setItem(LS_FAVS, JSON.stringify(favs)); }
 
+// ===== 取り込みデータの保存（IndexedDB。localStorageではサイズ不足） =====
+function idbOpen() {
+  return new Promise((ok, ng) => {
+    const rq = indexedDB.open("hachibus", 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore("kv");
+    rq.onsuccess = () => ok(rq.result);
+    rq.onerror = () => ng(rq.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((ok, ng) => {
+    const rq = db.transaction("kv").objectStore("kv").get(key);
+    rq.onsuccess = () => ok(rq.result);
+    rq.onerror = () => ng(rq.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await idbOpen();
+  return new Promise((ok, ng) => {
+    const tx = db.transaction("kv", "readwrite");
+    tx.objectStore("kv").put(val, key);
+    tx.oncomplete = () => ok();
+    tx.onerror = () => ng(tx.error);
+  });
+}
+async function idbDel(key) {
+  const db = await idbOpen();
+  return new Promise((ok, ng) => {
+    const tx = db.transaction("kv", "readwrite");
+    tx.objectStore("kv").delete(key);
+    tx.oncomplete = () => ok();
+    tx.onerror = () => ng(tx.error);
+  });
+}
+
+// 複数事業者データのときだけ事業者バッジを付ける
+function opChip(t) {
+  return DATA.op && DATA.op.length > 1
+    ? '<span class="opchip">' + esc(DATA.op[t.op || 0]) + "</span>" : "";
+}
+
 // ===== 検索ロジック =====
 // 乗車・降車グループを「その順序で」通る便を抽出（stop_sequence 順のデータを走査）
 function findTrips(fromGi, toGi, dia) {
   const fa = new Set(stopsOfGroup[fromGi]), ta = new Set(stopsOfGroup[toGi]);
   const out = [];
-  for (const [cls, bi, hi, flat] of DATA.t) {
+  for (const tr of DATA.t) {
+    const [cls, bi, hi, flat] = tr;
     if (cls !== dia) continue;
     let bK = -1, bDep = 0, bSi = -1;
     for (let k = 0; k < flat.length; k += 3) {
@@ -573,7 +630,8 @@ function findTrips(fromGi, toGi, dia) {
       if (bK < 0) {
         if (fa.has(si)) { bK = k; bDep = dep; bSi = si; }
       } else if (ta.has(si)) {
-        out.push({ dep: bDep, arr: dep - dd, badge: DATA.b[bi], head: DATA.h[hi], fs: bSi, ts: si });
+        out.push({ dep: bDep, arr: dep - dd, badge: DATA.b[bi], head: DATA.h[hi],
+                   fs: bSi, ts: si, op: tr[4] || 0 });
         break;
       }
     }
@@ -718,7 +776,7 @@ function renderNext() {
       '<div class="detail">' +
         '<div>' + (n.badge ? '<span class="badge">' + esc(n.badge) + "</span>" : "") +
           '<span class="times num">' + fmtMin(n.dep) + '<span class="arrow">→</span>' + fmtMin(n.arr) + "</span></div>" +
-        '<div class="meta num">所要' + (n.arr - n.dep) + "分・" + esc(n.head) + "行</div>" +
+        '<div class="meta num">所要' + (n.arr - n.dep) + "分・" + esc(n.head) + "行" + opChip(n) + "</div>" +
         (DATA.s[n.fs][1] ? '<div class="meta">' + esc(DATA.s[n.fs][1]) + "番のりば</div>" : "") +
       "</div>" +
     "</div>";
@@ -770,7 +828,7 @@ function renderResults() {
       '<div class="body">' +
         '<div class="t num">' + fmtMin(t.dep) + '<span class="arrow">→</span>' + fmtMin(t.arr) +
           '<span class="dur">' + (t.arr - t.dep) + "分</span></div>" +
-        '<div class="sub">' + esc(t.head) + "行" + (plat ? "・" + esc(plat) + "番のりば" : "") + "</div>" +
+        '<div class="sub">' + esc(t.head) + "行" + (plat ? "・" + esc(plat) + "番のりば" : "") + opChip(t) + "</div>" +
       "</div>";
     const star = document.createElement("button");
     star.className = "star" + (isFav(state.from, state.to) ? " on" : "");
@@ -1169,14 +1227,62 @@ function render() {
 }
 
 // ===== 起動 =====
-async function main() {
-  try {
-    const res = await fetch("data.json");
-    DATA = await res.json();
-  } catch (e) {
-    $("#nextCard").textContent = "data.json の読み込みに失敗しました";
-    return;
+// フッターのデータソース表示（取り込み / 公開に戻す）
+function renderDataSrc() {
+  const row = $("#dataSrcRow");
+  if (usingImported) {
+    const d = importedAt ? new Date(importedAt) : null;
+    row.innerHTML = "取り込みデータ使用中" +
+      (d ? "（" + (d.getMonth() + 1) + "/" + d.getDate() + "取り込み）" : "") +
+      '<button class="linkbtn" id="resetDataBtn" type="button">公開データに戻す</button>';
+    $("#resetDataBtn").addEventListener("click", async () => {
+      if (!confirm("取り込んだ統合データを削除して、公開データ（市営バスのみ）に戻しますか？")) return;
+      try { await idbDel("data"); } catch (e) { /* 続行 */ }
+      location.reload();
+    });
+  } else {
+    row.innerHTML = '<button class="linkbtn" id="importBtn" type="button">統合データを取り込む</button>';
+    $("#importBtn").addEventListener("click", () => $("#importFile").click());
   }
+  if (DATA.op && DATA.op.length > 1) {
+    $("#srcLabel").textContent = "データ: " + DATA.op.join("・") + "（各社GTFS-JP）";
+  }
+}
+
+async function main() {
+  // 端末に取り込んだ統合データがあれば最優先で使う
+  try {
+    const imp = await idbGet("data");
+    if (imp && imp.data && Array.isArray(imp.data.t) && Array.isArray(imp.data.g)) {
+      DATA = imp.data;
+      usingImported = true;
+      importedAt = imp.at || 0;
+    }
+  } catch (e) { /* IndexedDB が使えない環境では公開データへ */ }
+  if (!DATA) {
+    try {
+      const res = await fetch("data.json");
+      DATA = await res.json();
+    } catch (e) {
+      $("#nextCard").textContent = "data.json の読み込みに失敗しました";
+      return;
+    }
+  }
+  $("#importFile").addEventListener("change", async () => {
+    const f = $("#importFile").files[0];
+    if (!f) return;
+    try {
+      const obj = JSON.parse(await f.text());
+      if (!obj || !Array.isArray(obj.g) || !Array.isArray(obj.s) ||
+          !Array.isArray(obj.t) || !obj.ex) throw new Error("format");
+      await idbSet("data", { data: obj, at: Date.now() });
+      location.reload();
+    } catch (e) {
+      alert("データを読み込めませんでした。build_data.py が生成した private-data.json を選んでください");
+      $("#importFile").value = "";
+    }
+  });
+  renderDataSrc();
   buildIndex();
   try { favs = JSON.parse(localStorage.getItem(LS_FAVS)) || []; } catch (e) { favs = []; }
   try {
