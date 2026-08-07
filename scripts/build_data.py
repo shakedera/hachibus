@@ -392,6 +392,12 @@ def build(zip_paths, out_path, label):
     for fd in feeds:
         holiday_map.update(fd["holiday_map"])
     expires = min((fd["expires"] for fd in feeds if fd["expires"]), default="")
+    # 事業者別の有効期限（警告バーで「どの社のzipを更新すべきか」を出すため）
+    op_expires = [""] * len(ops)
+    for fd in feeds:
+        i, e = fd["op_i"], fd["expires"]
+        if e and (not op_expires[i] or e < op_expires[i]):
+            op_expires[i] = e
 
     version = ""
     for fd, p in zip(feeds, zip_paths):
@@ -405,6 +411,7 @@ def build(zip_paths, out_path, label):
     data = {
         "v": version,          # 代表（市営）フィードのバージョン表記
         "ex": expires,         # ダイヤ有効期限 YYYYMMDD（全フィードの最小）
+        "exs": op_expires,     # 事業者別の有効期限（op と同順）
         "hd": holiday_map,     # 例外日 YYYYMMDD → ダイヤ区分(0/1/2)
         "op": ops,             # 事業者名テーブル（2件以上のときアプリがバッジ表示）
         "g": groups,           # バス停名グループ [名前, かな]

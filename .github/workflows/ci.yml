@@ -1,0 +1,21 @@
+name: CI
+
+on: [push, workflow_dispatch]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 前処理を再実行し、コミット済み docs/data.json と一致するか検証
+      # （ビルド忘れ・生成物と源泉GTFSのズレを検知。標準ライブラリのみなのでsetup不要）
+      - name: Rebuild data.json (deterministic)
+        run: python3 scripts/build_data.py
+
+      - name: Ensure committed data.json matches build output
+        run: git diff --exit-code docs/data.json
+
+      # データの不変条件テスト（スキーマ・時刻の単調性・主要区間の検索可能性）
+      - name: Run data tests
+        run: python3 scripts/test_data.py

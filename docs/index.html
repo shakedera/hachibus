@@ -199,6 +199,37 @@ footer .linkbtn{
   border-radius:4px;padding:1px 5px;margin-left:6px;
   vertical-align:1px;
 }
+/* バスいまどこ（公式バスロケへの外部リンク） */
+.buslocLink{
+  display:inline-block;margin-top:8px;font-size:12px;font-weight:600;
+  color:#fff;opacity:.92;text-decoration:underline;
+}
+/* バス停待機モード（全画面カウントダウン） */
+#waitOverlay{
+  position:fixed;inset:0;z-index:70;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:12px;color:#fff;text-align:center;
+  background:linear-gradient(135deg,var(--blue) 0%,var(--navy) 100%);
+  cursor:pointer;padding:20px;
+}
+#waitOverlay.show{display:flex}
+#waitOverlay .wroute{font-size:16px;opacity:.92}
+#waitOverlay .wcount{font-size:84px;font-weight:800;letter-spacing:-.02em;line-height:1.05}
+#waitOverlay .winfo{font-size:16px;opacity:.92}
+#waitOverlay .whint{
+  position:absolute;bottom:calc(28px + env(safe-area-inset-bottom, 0px));
+  font-size:12px;opacity:.65;
+}
+/* のりば時刻表 */
+.tthour{
+  font-size:12px;font-weight:700;color:var(--sub);background:var(--bg);
+  padding:4px 10px;border-radius:6px;margin:10px 0 4px;
+}
+.suggest div{display:flex;align-items:center;gap:8px}
+.suggest div .sugname{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ttbtn{
+  flex:none;border:1px solid var(--line);background:#fff;color:var(--blue);
+  border-radius:6px;font-size:11px;font-weight:700;padding:3px 8px;cursor:pointer;
+}
 
 /* ===== 目的地から（ボトムシート） mock-location-v4 準拠 ===== */
 :root{--dest-red:#E0503A}
@@ -469,6 +500,7 @@ footer .linkbtn{
     <span id="srcLabel">出典: 八戸市交通部 GTFS-JPオープンデータ（CC BY 4.0）</span><br>
     <span id="expireLabel" class="num"></span><br>
     <span id="dataSrcRow"></span>
+    <button class="linkbtn" id="errBtn" type="button">エラーログ</button>
     <input type="file" id="importFile" accept=".json,application/json" style="display:none">
   </footer>
 
@@ -531,6 +563,28 @@ footer .linkbtn{
       </div>
     </div>
   </div>
+  <!-- のりば時刻表シート -->
+  <div class="overlay" id="ttOverlay"></div>
+  <div class="sheet" id="ttSheet">
+    <div class="sheethead">
+      <h2>
+        <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.2 3.1.8-1.3-4.5-2.7V7z"/></svg>
+        <span id="ttTitle">時刻表</span>
+      </h2>
+    </div>
+    <p class="sheetnote" id="ttNote"></p>
+    <div id="ttList"></div>
+  </div>
+
+  <!-- バス停待機モード -->
+  <div id="waitOverlay">
+    <div class="wroute" id="wRoute"></div>
+    <div class="wcount num" id="wCount">--:--</div>
+    <div class="winfo num" id="wInfo"></div>
+    <a class="buslocLink" id="wBusloc" target="_blank" rel="noopener" style="display:none">バスいまどこ（公式運行情報）</a>
+    <div class="whint">タップで閉じる・表示中は画面が消灯しません</div>
+  </div>
+
   <div class="toast" id="locToast"></div>
 </div>
 
@@ -635,6 +689,31 @@ function opChip(t) {
   const c = OP_COLORS[name] || "#66727F";
   return '<span class="opchip" style="background:' + c + '">' + esc(name) + "</span>";
 }
+
+// 公式バスロケ（接近情報）サイト。GTFS-RTは4社とも未公開のため外部リンクで補う
+const BUSLOC_URLS = {
+  "市営": "https://city-hachinohe.bus-navigation.jp/wgsys/wgs/search.htm",
+  "南部": "https://mc.bus-vision.jp/nanbubus/view/searchStop.html",
+};
+function buslocUrl(opIdx) {
+  const name = DATA.op ? DATA.op[opIdx || 0] : "市営";
+  return BUSLOC_URLS[name] || null;
+}
+
+// ===== エラーの見える化（iPhoneではDevToolsが無いため、直近20件を端末内に記録） =====
+const ERRLOG_KEY = "hachibus.errlog";
+function logError(msg) {
+  try {
+    const log = JSON.parse(localStorage.getItem(ERRLOG_KEY) || "[]");
+    log.push(new Date().toISOString().slice(0, 19).replace("T", " ") + " " + msg);
+    while (log.length > 20) log.shift();
+    localStorage.setItem(ERRLOG_KEY, JSON.stringify(log));
+  } catch (e) { /* 記録できない環境では無視 */ }
+}
+window.addEventListener("error", e =>
+  logError((e.message || "error") + " @" + String(e.filename || "").split("/").pop() + ":" + (e.lineno || 0)));
+window.addEventListener("unhandledrejection", e =>
+  logError("Promise: " + ((e.reason && e.reason.message) || e.reason)));
 
 // ===== 検索ロジック =====
 // 便の運行日判定（svテーブル: [曜日mask(月=bit0), start, end, 追加日[], 運休日[], ラベル]）
@@ -745,6 +824,138 @@ function findTransfers(fromGi, toGi, dia, todayOnly) {
   return [...best.values()];
 }
 
+// ===== のりば時刻表（この停留所を今日発車する全便） =====
+function findDepartures(gi) {
+  const set = new Set(stopsOfGroup[gi]);
+  const dia = diaOfToday(), today = new Date();
+  const out = [];
+  for (const tr of DATA.t) {
+    if (tr[0] !== dia) continue;
+    if (!runsOn(tr[5], today)) continue;
+    const flat = tr[3], { noPu } = restrSets(tr[6]);
+    const last = flat.length / 3 - 1;
+    for (let k = 0; k < flat.length; k += 3) {
+      const p = k / 3, si = flat[k];
+      if (p === last) continue;   // 終着（降車のみ）は発車一覧に出さない
+      if (!set.has(si) || (noPu && noPu.has(p))) continue;
+      out.push({ dep: flat[k + 1], badge: DATA.b[tr[1]], head: DATA.h[tr[2]],
+                 plat: DATA.s[si][1], op: tr[4] || 0, lbl: svLabel(tr[5]) });
+    }
+  }
+  return out.sort((a, b) => a.dep - b.dep);
+}
+function openTimetable(gi) {
+  const deps = findDepartures(gi);
+  $("#ttTitle").textContent = DATA.g[gi][0];
+  $("#ttNote").textContent = "本日（" + DIA_NAMES[diaOfToday()] + "ダイヤ）の発車 " + deps.length + " 便";
+  const list = $("#ttList");
+  list.innerHTML = deps.length ? "" : '<div class="empty-msg">本日の発車はありません</div>';
+  const now = nowMin();
+  let hourHdr = -1, firstUpcoming = null;
+  deps.forEach(t => {
+    const h = Math.floor(t.dep / 60);
+    if (h !== hourHdr) {
+      hourHdr = h;
+      const hd = document.createElement("div");
+      hd.className = "tthour num";
+      hd.textContent = h + "時台";
+      list.appendChild(hd);
+    }
+    const row = document.createElement("div");
+    const isNext = !firstUpcoming && t.dep >= now;
+    row.className = "row" + (isNext ? " soon" : "");
+    if (isNext) firstUpcoming = row;
+    row.innerHTML =
+      (t.badge ? '<span class="badge">' + esc(t.badge) + "</span>"
+               : '<span class="badge" style="visibility:hidden">－</span>') +
+      '<div class="body">' +
+        '<div class="t num">' + fmtMin(t.dep) +
+          '<span class="dur">' + (t.plat ? esc(t.plat) + "番のりば" : "") + "</span></div>" +
+        '<div class="sub">' + esc(t.head) + "行" + opChip(t) +
+          (t.lbl ? '<span class="svchip">' + esc(t.lbl) + "</span>" : "") + "</div>" +
+      "</div>";
+    list.appendChild(row);
+  });
+  $("#ttOverlay").classList.add("show");
+  $("#ttSheet").classList.add("show");
+  if (firstUpcoming) setTimeout(() => firstUpcoming.scrollIntoView({ block: "center" }), 80);
+}
+function closeTimetable() {
+  $("#ttOverlay").classList.remove("show");
+  $("#ttSheet").classList.remove("show");
+}
+
+// ===== バス停待機モード（全画面カウントダウン・画面消灯防止） =====
+let waitTimer = null, wakeLockObj = null, waitList = [], waitIdx = 0, waitLabel = "";
+async function acquireWakeLock() {
+  try {
+    if ("wakeLock" in navigator) wakeLockObj = await navigator.wakeLock.request("screen");
+  } catch (e) { /* 未対応端末はカウントダウンのみ */ }
+}
+function openWaitMode() {
+  if (!favs.length) return;
+  const f = favs[state.sel] || favs[0];
+  const fgi = groupByName.get(f.f), tgi = groupByName.get(f.t);
+  if (fgi === undefined || tgi === undefined) return;
+  const now = nowMin();
+  waitList = findTrips(fgi, tgi, diaOfToday(), true)
+    .filter(t => t.dep >= now).sort((a, b) => a.dep - b.dep);
+  if (!waitList.length) return;
+  waitIdx = 0;
+  waitLabel = favLabel(f);
+  $("#waitOverlay").classList.add("show");
+  acquireWakeLock();
+  tickWait();
+  clearInterval(waitTimer);
+  waitTimer = setInterval(tickWait, 1000);
+}
+function closeWaitMode() {
+  $("#waitOverlay").classList.remove("show");
+  clearInterval(waitTimer);
+  waitTimer = null;
+  if (wakeLockObj) { wakeLockObj.release().catch(() => {}); wakeLockObj = null; }
+}
+function tickWait() {
+  const n = new Date();
+  const nowSec = n.getHours() * 3600 + n.getMinutes() * 60 + n.getSeconds();
+  // 発車から20秒過ぎたら次の便へ送る
+  while (waitIdx < waitList.length && waitList[waitIdx].dep * 60 < nowSec - 20) waitIdx++;
+  if (waitIdx >= waitList.length) { closeWaitMode(); return; }
+  const t = waitList[waitIdx];
+  const rem = t.dep * 60 - nowSec;
+  $("#wRoute").textContent = waitLabel;
+  $("#wCount").textContent = rem <= 0 ? "発車"
+    : Math.floor(rem / 60) + ":" + String(rem % 60).padStart(2, "0");
+  $("#wInfo").textContent = (t.badge ? t.badge + "・" : "") + fmtMin(t.dep) + "発 " + t.head + "行";
+  const url = buslocUrl(t.op), a = $("#wBusloc");
+  if (url) { a.href = url; a.style.display = "inline-block"; }
+  else a.style.display = "none";
+}
+
+function bindExtras() {
+  $("#ttOverlay").addEventListener("click", closeTimetable);
+  $("#waitOverlay").addEventListener("click", e => {
+    if (e.target.closest("a")) return;
+    closeWaitMode();
+  });
+  $("#nextCard").addEventListener("click", e => {
+    if (e.target.closest("a")) return;
+    openWaitMode();
+  });
+  $("#errBtn").addEventListener("click", async () => {
+    let log = [];
+    try { log = JSON.parse(localStorage.getItem(ERRLOG_KEY) || "[]"); } catch (e) { /* 空扱い */ }
+    if (!log.length) { alert("エラーの記録はありません"); return; }
+    const text = log.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("エラーログ" + log.length + "件をコピーしました。\n\n" + text.slice(-600));
+    } catch (e) {
+      alert(text.slice(-900));
+    }
+  });
+}
+
 // ===== バス停サジェスト =====
 function buildIndex() {
   DATA.g.forEach((g, gi) => {
@@ -805,7 +1016,20 @@ function attachSuggest(inputId, boxId, key) {
     box.innerHTML = "";
     hits.forEach(e => {
       const div = document.createElement("div");
-      div.textContent = DATA.g[e.gi][0];
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "sugname";
+      nameSpan.textContent = DATA.g[e.gi][0];
+      const tb = document.createElement("button");
+      tb.className = "ttbtn";
+      tb.type = "button";
+      tb.textContent = "時刻表";
+      tb.addEventListener("pointerdown", ev => { ev.preventDefault(); ev.stopPropagation(); });
+      tb.addEventListener("click", ev => {
+        ev.stopPropagation();
+        box.style.display = "none";
+        openTimetable(e.gi);
+      });
+      div.append(nameSpan, tb);
       div.addEventListener("pointerdown", ev => {
         ev.preventDefault();
         input.value = DATA.g[e.gi][0];
@@ -917,7 +1141,10 @@ function renderNext() {
         '<div class="meta num">所要' + (n.arr - n.dep) + "分・" + esc(n.head) + "行" + opChip(n) + "</div>" +
         (DATA.s[n.fs][1] ? '<div class="meta">' + esc(DATA.s[n.fs][1]) + "番のりば</div>" : "") +
       "</div>" +
-    "</div>";
+    "</div>" +
+    (buslocUrl(n.op)
+      ? '<a class="buslocLink" href="' + buslocUrl(n.op) + '" target="_blank" rel="noopener">バスいまどこ（公式運行情報）</a>'
+      : "");
   trips.slice(1, 3).forEach(t => {
     const d = document.createElement("div");
     d.className = "afterCard num";
@@ -1323,13 +1550,23 @@ function renderHeader() {
   $("#expireLabel").textContent =
     "ダイヤ有効期限: " + exDate.getFullYear() + "/" + (exDate.getMonth() + 1) + "/" + exDate.getDate() +
     (DATA.v ? "（" + DATA.v + "）" : "");
-  const days = Math.floor((exDate - d) / 86400000);
-  if (days < 14) {
+  // 事業者別の期限で警告（どの社のデータを更新すべきか分かるように）
+  const exs = DATA.exs || [DATA.ex];
+  const near = [];
+  exs.forEach((e, i) => {
+    if (!e) return;
+    const s = String(e);
+    const ed = new Date(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
+    const days = Math.floor((ed - d) / 86400000);
+    if (days < 14) {
+      near.push(((DATA.op && DATA.op[i]) || "データ") +
+        (days < 0 ? "（期限切れ）" : "（あと" + days + "日）"));
+    }
+  });
+  if (near.length) {
     const bar = $("#expireBar");
     bar.style.display = "block";
-    bar.textContent = days < 0
-      ? "ダイヤの有効期限が切れています。データを更新してください"
-      : "ダイヤ改正の可能性があります。データを更新してください（有効期限まで" + days + "日）";
+    bar.textContent = near.join("・") + " のダイヤ有効期限が近づいています。データを更新してください";
   }
 }
 
@@ -1457,13 +1694,18 @@ async function main() {
   attachSuggest("#toInput", "#toSuggest", "to");
   bindTabs();
   bindLocSheet();
+  bindExtras();
   applyStateToUI();
   render();
 
   // 1分ごとに「あと◯分」を自動更新
   timer = setInterval(() => { renderNext(); if (state.mode === "now") renderResults(); }, 60000);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) { refreshDia(); applyStateToUI(); render(); }
+    if (!document.hidden) {
+      refreshDia(); applyStateToUI(); render();
+      // 待機モード表示中に復帰したら消灯防止を取り直す（Wake Lockはバックグラウンドで解放される）
+      if ($("#waitOverlay").classList.contains("show")) acquireWakeLock();
+    }
   });
 
   if ("serviceWorker" in navigator) {
